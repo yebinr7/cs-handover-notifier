@@ -1,4 +1,5 @@
 import json
+import sys
 import requests
 from datetime import datetime
 
@@ -74,3 +75,20 @@ def format_message(page):
     lines.append(f"[노션에서 보기]({page['url']})")
 
     return "\n".join(lines)
+
+
+def send_telegram_message(bot_token, chat_id, text):
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "Markdown",
+        "disable_web_page_preview": True,
+    }
+    try:
+        response = requests.post(url, json=payload, timeout=15)
+        response.raise_for_status()
+        return True
+    except requests.RequestException as exc:
+        print(f"[ERROR] 텔레그램 전송 실패: {exc}", file=sys.stderr)
+        return False

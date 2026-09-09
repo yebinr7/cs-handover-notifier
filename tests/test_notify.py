@@ -120,3 +120,34 @@ def test_format_message_day_shift_without_content():
         "☀️ 주간 백규균 (2026-09-09)\n"
         "[노션에서 보기](https://www.notion.so/1122334455667788)"
     )
+
+
+import requests
+
+from notify import send_telegram_message
+
+
+@patch("notify.requests.post")
+def test_send_telegram_message_success_returns_true(mock_post):
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+    mock_post.return_value = mock_response
+
+    result = send_telegram_message("fake-bot-token", "fake-chat-id", "hello")
+
+    assert result is True
+    called_url = mock_post.call_args.args[0]
+    assert called_url == "https://api.telegram.org/botfake-bot-token/sendMessage"
+    called_payload = mock_post.call_args.kwargs["json"]
+    assert called_payload["chat_id"] == "fake-chat-id"
+    assert called_payload["text"] == "hello"
+    assert called_payload["parse_mode"] == "Markdown"
+
+
+@patch("notify.requests.post")
+def test_send_telegram_message_failure_returns_false(mock_post):
+    mock_post.side_effect = requests.RequestException("network error")
+
+    result = send_telegram_message("fake-bot-token", "fake-chat-id", "hello")
+
+    assert result is False
