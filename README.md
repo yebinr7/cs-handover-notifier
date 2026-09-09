@@ -12,8 +12,11 @@ Notion "인수인계" DB에 새 글이 올라오면 5분 안에 텔레그램 그
 
 ### 2. Notion Database ID 확인하기
 "인수인계" DB를 브라우저에서 열면 주소가 다음과 같은 형태다:
-`https://www.notion.so/워크스페이스이름/1234567890abcdef1234567890abcdef?v=...`
-`?` 앞, 마지막 슬래시 뒤의 32자리 문자열이 `NOTION_DATABASE_ID`다.
+`https://www.notion.so/워크스페이스이름/인수인계-1234567890abcdef1234567890abcdef?v=...`
+
+**주의:** 데이터베이스 이름(이 경우 "인수인계")이 URL에 포함되어 있습니다. `NOTION_DATABASE_ID`로는 **이름을 제외한 `?` 앞의 마지막 32자리 16진수 문자열만** 복사합니다.
+- ❌ 잘못된 예: `인수인계-1234567890abcdef1234567890abcdef`
+- ✓ 올바른 예: `1234567890abcdef1234567890abcdef`
 
 ### 3. 텔레그램 봇 만들기
 1. 텔레그램에서 `@BotFather` 검색 후 대화 시작
@@ -35,7 +38,15 @@ Notion "인수인계" DB에 새 글이 올라오면 5분 안에 텔레그램 그
 - `TELEGRAM_CHAT_ID`
 
 ### 6. 최초 state.json 값 확인
-`state.json`의 `last_checked` 값이 "지금 배포하는 시점"으로 되어 있는지 확인한다. 이 값보다 이전에 생성된 인수인계 글은 알림이 가지 않는다 (의도된 동작).
+`state.json`은 초기 배포 시 생성되며, `last_checked` 값이 배포 시점(UTC)으로 설정됩니다. 이 값보다 이전에 생성된 인수인계 글은 알림이 가지 않습니다 (의도된 동작).
+
+**만약 `state.json`이 없거나 재시딩이 필요한 경우:**
+```bash
+python -c "from datetime import datetime, timezone; import json; json.dump({'last_checked': datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00','Z')}, open('state.json','w'))"
+git add state.json
+git commit -m "chore: state.json 재시딩"
+git push
+```
 
 ## 동작 확인
 GitHub 리포지토리의 Actions 탭 → "Notion Handover Notifier" 워크플로우 → "Run workflow" 버튼으로 수동 실행해서 텔레그램에 메시지가 오는지 확인한다. 이후에는 5분마다 자동으로 실행된다.
