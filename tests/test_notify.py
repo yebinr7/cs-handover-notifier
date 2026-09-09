@@ -1,7 +1,8 @@
 import json
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 
-from notify import load_state, save_state, parse_page
+from notify import load_state, save_state, parse_page, build_notion_query_payload, fetch_new_pages
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -51,3 +52,32 @@ def test_parse_page_handles_empty_fields():
     assert result["summary"] == ""
     assert result["checklist"] == ""
     assert result["name"] == "주간 백규균"
+
+
+def test_build_notion_query_payload_filters_by_created_time():
+    payload = build_notion_query_payload("2026-09-09T00:00:00.000Z")
+
+    assert payload == {
+        "filter": {
+            "property": "생성일",
+            "created_time": {"after": "2026-09-09T00:00:00.000Z"},
+        },
+        "sorts": [{"timestamp": "created_time", "direction": "ascending"}],
+    }
+
+
+@patch("notify.requests.post")
+def test_fetch_new_pages_returns_results_list(mock_post):
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"results": [{"id": "page-1"}]}
+    mock_response.raise_for_status.return_value = None
+    mock_post.return_value = mock_response
+
+    result = fetch_new_pages("fake-token", "fake-db-id", "2026-09-09T00:00:00.000Z")
+
+    assert result == [{"id": "page-1"}]
+    called_url = mock_post.call_args.args[0]
+    assert called_url == "https://api.notion.com/v1/databases/fake-db-id/query"
+    called_headers = mock_post.call_args.kwargs["headers"]
+    assert called_headers["Authorization"] == "Bearer fake-token"
+    assert called_headers["Notion-Version"] == "2022-06-28"

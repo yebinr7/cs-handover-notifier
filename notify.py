@@ -1,6 +1,8 @@
 import json
+import requests
 
 STATE_FILE = "state.json"
+NOTION_VERSION = "2022-06-28"
 
 
 def load_state(path=STATE_FILE):
@@ -32,3 +34,26 @@ def parse_page(page):
         "created_time": page["created_time"],
         "url": page["url"],
     }
+
+
+def build_notion_query_payload(since_iso):
+    return {
+        "filter": {
+            "property": "생성일",
+            "created_time": {"after": since_iso},
+        },
+        "sorts": [{"timestamp": "created_time", "direction": "ascending"}],
+    }
+
+
+def fetch_new_pages(notion_token, database_id, since_iso):
+    url = f"https://api.notion.com/v1/databases/{database_id}/query"
+    headers = {
+        "Authorization": f"Bearer {notion_token}",
+        "Notion-Version": NOTION_VERSION,
+        "Content-Type": "application/json",
+    }
+    payload = build_notion_query_payload(since_iso)
+    response = requests.post(url, headers=headers, json=payload, timeout=15)
+    response.raise_for_status()
+    return response.json()["results"]
