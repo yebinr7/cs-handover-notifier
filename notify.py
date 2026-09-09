@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import requests
 from datetime import datetime
@@ -92,3 +93,40 @@ def send_telegram_message(bot_token, chat_id, text):
     except requests.RequestException as exc:
         print(f"[ERROR] 텔레그램 전송 실패: {exc}", file=sys.stderr)
         return False
+
+
+def run(notion_token, database_id, bot_token, chat_id, state_path=STATE_FILE):
+    state = load_state(state_path)
+    since_iso = state["last_checked"]
+
+    try:
+        raw_pages = fetch_new_pages(notion_token, database_id, since_iso)
+    except requests.RequestException as exc:
+        print(f"[ERROR] Notion 조회 실패: {exc}", file=sys.stderr)
+        return
+
+    pages = [parse_page(p) for p in raw_pages]
+
+    latest_sent = since_iso
+    for page in pages:
+        message = format_message(page)
+        if send_telegram_message(bot_token, chat_id, message):
+            latest_sent = page["created_time"]
+        else:
+            break
+
+    if latest_sent != since_iso:
+        save_state({"last_checked": latest_sent}, state_path)
+
+
+def main():
+    run(
+        notion_token=os.environ["NOTION_API_KEY"],
+        database_id=os.environ["NOTION_DATABASE_ID"],
+        bot_token=os.environ["TELEGRAM_BOT_TOKEN"],
+        chat_id=os.environ["TELEGRAM_CHAT_ID"],
+    )
+
+
+if __name__ == "__main__":
+    main()

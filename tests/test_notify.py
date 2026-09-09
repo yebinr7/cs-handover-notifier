@@ -151,3 +151,71 @@ def test_send_telegram_message_failure_returns_false(mock_post):
     result = send_telegram_message("fake-bot-token", "fake-chat-id", "hello")
 
     assert result is False
+
+
+from notify import run
+
+FIXTURE_PAGES = [
+    {
+        "created_time": "2026-09-09T03:00:00.000Z",
+        "url": "https://www.notion.so/abcdef1234567890",
+        "properties": {
+            "이름": {"title": [{"plain_text": "야간 김예빈"}]},
+            "요약": {"rich_text": [{"plain_text": "서보 다 전원 나간 이유.."}]},
+            "체크할것": {"rich_text": [{"plain_text": "알람 없음 확인필요..."}]},
+        },
+    },
+    {
+        "created_time": "2026-09-09T09:00:00.000Z",
+        "url": "https://www.notion.so/1122334455667788",
+        "properties": {
+            "이름": {"title": [{"plain_text": "주간 백규균"}]},
+            "요약": {"rich_text": []},
+            "체크할것": {"rich_text": []},
+        },
+    },
+]
+
+
+def make_state_file(tmp_path, last_checked):
+    state_file = tmp_path / "state.json"
+    state_file.write_text(json.dumps({"last_checked": last_checked}), encoding="utf-8")
+    return state_file
+
+
+@patch("notify.send_telegram_message")
+@patch("notify.fetch_new_pages")
+def test_run_advances_state_to_latest_on_full_success(mock_fetch, mock_send, tmp_path):
+    mock_fetch.return_value = FIXTURE_PAGES
+    mock_send.return_value = True
+    state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
+
+    run("token", "db-id", "bot-token", "chat-id", state_path=str(state_file))
+
+    saved = json.loads(state_file.read_text(encoding="utf-8"))
+    assert saved == {"last_checked": "2026-09-09T09:00:00.000Z"}
+    assert mock_send.call_count == 2
+
+
+@patch("notify.send_telegram_message")
+@patch("notify.fetch_new_pages")
+def test_run_stops_state_before_failed_message(mock_fetch, mock_send, tmp_path):
+    mock_fetch.return_value = FIXTURE_PAGES
+    mock_send.side_effect = [True, False]
+    state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
+
+    run("token", "db-id", "bot-token", "chat-id", state_path=str(state_file))
+
+    saved = json.loads(state_file.read_text(encoding="utf-8"))
+    assert saved == {"last_checked": "2026-09-09T03:00:00.000Z"}
+
+
+@patch("notify.fetch_new_pages")
+def test_run_keeps_state_when_notion_fetch_fails(mock_fetch, tmp_path):
+    mock_fetch.side_effect = requests.RequestException("notion down")
+    state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
+
+    run("token", "db-id", "bot-token", "chat-id", state_path=str(state_file))
+
+    saved = json.loads(state_file.read_text(encoding="utf-8"))
+    assert saved == {"last_checked": "2026-09-01T00:00:00.000Z"}
