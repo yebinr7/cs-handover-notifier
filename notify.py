@@ -1,11 +1,14 @@
+import html
 import json
 import os
 import sys
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 STATE_FILE = "state.json"
 NOTION_VERSION = "2022-06-28"
+KST = timezone(timedelta(hours=9))
+MAX_FIELD_LEN = 1000
 
 
 def load_state(path=STATE_FILE):
@@ -18,17 +21,16 @@ def save_state(state, path=STATE_FILE):
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
+def _plain_text(rich_items):
+    return "".join(item["plain_text"] for item in rich_items)
+
+
 def parse_page(page):
     props = page["properties"]
 
-    title_list = props["이름"]["title"]
-    name = title_list[0]["plain_text"] if title_list else "(제목 없음)"
-
-    summary_list = props["요약"]["rich_text"]
-    summary = summary_list[0]["plain_text"] if summary_list else ""
-
-    checklist_list = props["체크할것"]["rich_text"]
-    checklist = checklist_list[0]["plain_text"] if checklist_list else ""
+    name = _plain_text(props["이름"]["title"]) or "(제목 없음)"
+    summary = _plain_text(props["요약"]["rich_text"])
+    checklist = _plain_text(props["체크할것"]["rich_text"])
 
     return {
         "name": name,
@@ -62,18 +64,29 @@ def fetch_new_pages(notion_token, database_id, since_iso):
     return response.json()["results"]
 
 
+def _truncate(text, limit=MAX_FIELD_LEN):
+    if len(text) > limit:
+        return text[:limit] + "…"
+    return text
+
+
 def format_message(page):
     emoji = "🌙" if page["name"].startswith("야간") else "☀️"
 
-    created_dt = datetime.fromisoformat(page["created_time"].replace("Z", "+00:00"))
+    created_dt = datetime.fromisoformat(
+        page["created_time"].replace("Z", "+00:00")
+    ).astimezone(KST)
     date_str = created_dt.strftime("%Y-%m-%d")
 
-    lines = [f"{emoji} {page['name']} ({date_str})"]
-    if page["summary"]:
-        lines.append(f"요약: {page['summary']}")
-    if page["checklist"]:
-        lines.append(f"체크할것: {page['checklist']}")
-    lines.append(f"[노션에서 보기]({page['url']})")
+    summary = _truncate(page["summary"])
+    checklist = _truncate(page["checklist"])
+
+    lines = [f"{emoji} {html.escape(page['name'])} ({date_str})"]
+    if summary:
+        lines.append(f"요약: {html.escape(summary)}")
+    if checklist:
+        lines.append(f"체크할것: {html.escape(checklist)}")
+    lines.append(f'<a href="{html.escape(page["url"], quote=True)}">노션에서 보기</a>')
 
     return "\n".join(lines)
 
@@ -83,7 +96,7 @@ def send_telegram_message(bot_token, chat_id, text):
     payload = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "Markdown",
+        "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
     try:
@@ -91,7 +104,8 @@ def send_telegram_message(bot_token, chat_id, text):
         response.raise_for_status()
         return True
     except requests.RequestException as exc:
-        print(f"[ERROR] 텔레그램 전송 실패: {exc}", file=sys.stderr)
+        safe_message = str(exc).replace(bot_token, "***")
+        print(f"[ERROR] 텔레그램 전송 실패: {safe_message}", file=sys.stderr)
         return False
 
 
@@ -103,29 +117,43 @@ def run(notion_token, database_id, bot_token, chat_id, state_path=STATE_FILE):
         raw_pages = fetch_new_pages(notion_token, database_id, since_iso)
     except requests.RequestException as exc:
         print(f"[ERROR] Notion 조회 실패: {exc}", file=sys.stderr)
-        return
+        return False
 
     pages = [parse_page(p) for p in raw_pages]
 
+    ok = True
     latest_sent = since_iso
     for page in pages:
         message = format_message(page)
         if send_telegram_message(bot_token, chat_id, message):
             latest_sent = page["created_time"]
         else:
+            if latest_sent == page["created_time"]:
+                latest_sent = since_iso
+            ok = False
             break
 
     if latest_sent != since_iso:
         save_state({"last_checked": latest_sent}, state_path)
 
+    return ok
+
 
 def main():
-    run(
+    required = ["NOTION_API_KEY", "NOTION_DATABASE_ID", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]
+    missing = [key for key in required if not os.environ.get(key)]
+    if missing:
+        print(f"[ERROR] 환경변수 누락: {', '.join(missing)}", file=sys.stderr)
+        sys.exit(1)
+
+    ok = run(
         notion_token=os.environ["NOTION_API_KEY"],
         database_id=os.environ["NOTION_DATABASE_ID"],
         bot_token=os.environ["TELEGRAM_BOT_TOKEN"],
         chat_id=os.environ["TELEGRAM_CHAT_ID"],
     )
+    if not ok:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
