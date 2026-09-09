@@ -81,3 +81,42 @@ def test_fetch_new_pages_returns_results_list(mock_post):
     called_headers = mock_post.call_args.kwargs["headers"]
     assert called_headers["Authorization"] == "Bearer fake-token"
     assert called_headers["Notion-Version"] == "2022-06-28"
+
+
+from notify import format_message
+
+
+def test_format_message_night_shift_with_content():
+    page = {
+        "name": "야간 김예빈",
+        "summary": "서보 다 전원 나간 이유..",
+        "checklist": "알람 없음 확인필요...",
+        "created_time": "2026-09-08T15:00:00.000Z",
+        "url": "https://www.notion.so/abcdef1234567890",
+    }
+
+    message = format_message(page)
+
+    assert message == (
+        "🌙 야간 김예빈 (2026-09-08)\n"
+        "요약: 서보 다 전원 나간 이유..\n"
+        "체크할것: 알람 없음 확인필요...\n"
+        "[노션에서 보기](https://www.notion.so/abcdef1234567890)"
+    )
+
+
+def test_format_message_day_shift_without_content():
+    page = {
+        "name": "주간 백규균",
+        "summary": "",
+        "checklist": "",
+        "created_time": "2026-09-09T00:00:00.000Z",
+        "url": "https://www.notion.so/1122334455667788",
+    }
+
+    message = format_message(page)
+
+    assert message == (
+        "☀️ 주간 백규균 (2026-09-09)\n"
+        "[노션에서 보기](https://www.notion.so/1122334455667788)"
+    )

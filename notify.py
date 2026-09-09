@@ -1,5 +1,6 @@
 import json
 import requests
+from datetime import datetime
 
 STATE_FILE = "state.json"
 NOTION_VERSION = "2022-06-28"
@@ -57,3 +58,19 @@ def fetch_new_pages(notion_token, database_id, since_iso):
     response = requests.post(url, headers=headers, json=payload, timeout=15)
     response.raise_for_status()
     return response.json()["results"]
+
+
+def format_message(page):
+    emoji = "🌙" if page["name"].startswith("야간") else "☀️"
+
+    created_dt = datetime.fromisoformat(page["created_time"].replace("Z", "+00:00"))
+    date_str = created_dt.strftime("%Y-%m-%d")
+
+    lines = [f"{emoji} {page['name']} ({date_str})"]
+    if page["summary"]:
+        lines.append(f"요약: {page['summary']}")
+    if page["checklist"]:
+        lines.append(f"체크할것: {page['checklist']}")
+    lines.append(f"[노션에서 보기]({page['url']})")
+
+    return "\n".join(lines)
