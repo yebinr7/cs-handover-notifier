@@ -37,10 +37,12 @@ Notion "인수인계" DB에 새 글이 올라오면 5분 안에 텔레그램 그
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
 
-### 6. 최초 state.json 값 확인
-`state.json`은 초기 배포 시 생성되며, `last_checked` 값이 배포 시점(UTC)으로 설정됩니다. 이 값보다 이전에 생성된 인수인계 글은 알림이 가지 않습니다 (의도된 동작).
+### 6. 최초 state.json 만들기 (배포 전 반드시 직접 실행)
+`state.json`은 리포지토리에 들어있지 않습니다. 저절로 생기지 않으므로, **배포 첫 단계로 아래 명령을 직접 실행해서 만들어야 합니다.** 이 파일이 없으면 봇은 동작하지 않습니다.
 
-**만약 `state.json`이 없거나 재시딩이 필요한 경우:**
+명령을 실행하면 `last_checked` 값이 실행 시점(UTC)으로 기록되며, 그보다 이전에 생성된 인수인계 글은 알림이 가지 않습니다 (의도된 동작).
+
+**아래 명령을 실행해 `state.json`을 생성하고 커밋합니다 (나중에 재시딩이 필요할 때도 같은 명령을 씁니다):**
 ```bash
 python -c "from datetime import datetime, timezone; import json; json.dump({'last_checked': datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00','Z')}, open('state.json','w'))"
 git add state.json
