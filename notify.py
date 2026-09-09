@@ -44,7 +44,7 @@ def parse_page(page):
 def build_notion_query_payload(since_iso):
     return {
         "filter": {
-            "property": "생성일",
+            "timestamp": "created_time",
             "created_time": {"after": since_iso},
         },
         "sorts": [{"timestamp": "created_time", "direction": "ascending"}],

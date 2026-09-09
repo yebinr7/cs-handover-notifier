@@ -82,7 +82,7 @@ def test_build_notion_query_payload_filters_by_created_time():
 
     assert payload == {
         "filter": {
-            "property": "생성일",
+            "timestamp": "created_time",
             "created_time": {"after": "2026-09-09T00:00:00.000Z"},
         },
         "sorts": [{"timestamp": "created_time", "direction": "ascending"}],
