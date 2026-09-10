@@ -80,13 +80,10 @@ def format_message(page):
     date_str = created_dt.strftime("%Y-%m-%d")
 
     summary = _truncate(page["summary"])
-    checklist = _truncate(page["checklist"])
 
     lines = [f"{emoji} {html.escape(page['name'])} ({date_str})"]
     if summary:
         lines.append(f"요약: {html.escape(summary)}")
-    if checklist:
-        lines.append(f"체크할것: {html.escape(checklist)}")
     lines.append(f'<a href="{html.escape(page["url"], quote=True)}">노션에서 보기</a>')
 
     return "\n".join(lines)

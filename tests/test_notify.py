@@ -120,19 +120,17 @@ from notify import format_message
 def test_format_message_night_shift_with_content():
     page = {
         "name": "야간 김예빈",
-        "summary": "서보 다 전원 나간 이유..",
-        "checklist": "알람 없음 확인필요...",
+        "summary": "서보 알람 확인 후 케이블 점검 필요",
         "created_time": "2026-09-08T15:00:00.000Z",
         "url": "https://www.notion.so/abcdef1234567890",
     }
 
     message = format_message(page)
 
-    # created_time 2026-09-08T15:00Z = KST 2026-09-09 00:00 → 표시 날짜는 09-09 (야간조 날짜 밀림 수정)
+    # created_time 2026-09-08T15:00Z = KST 2026-09-09 00:00 → 표시 날짜는 09-09
     assert message == (
         "🌙 야간 김예빈 (2026-09-09)\n"
-        "요약: 서보 다 전원 나간 이유..\n"
-        "체크할것: 알람 없음 확인필요...\n"
+        "요약: 서보 알람 확인 후 케이블 점검 필요\n"
         '<a href="https://www.notion.so/abcdef1234567890">노션에서 보기</a>'
     )
 
@@ -141,7 +139,6 @@ def test_format_message_day_shift_without_content():
     page = {
         "name": "주간 백규균",
         "summary": "",
-        "checklist": "",
         "created_time": "2026-09-09T00:00:00.000Z",
         "url": "https://www.notion.so/1122334455667788",
     }
@@ -160,7 +157,6 @@ def test_format_message_escapes_html_special_characters():
     page = {
         "name": "야간 Loader_Hoist & DB_1",
         "summary": "M_400_1 <알람> & 확인",
-        "checklist": "",
         "created_time": "2026-09-08T15:00:00.000Z",
         "url": "https://www.notion.so/abcdef1234567890",
     }
@@ -169,17 +165,15 @@ def test_format_message_escapes_html_special_characters():
 
     assert "야간 Loader_Hoist &amp; DB_1" in message
     assert "M_400_1 &lt;알람&gt; &amp; 확인" in message
-    # 이스케이프 안 된 raw &가 남아있으면 안 된다 (&amp; 형태만 허용)
     assert "Hoist & DB" not in message
     assert "<알람>" not in message
 
 
-def test_format_message_truncates_long_fields():
+def test_format_message_truncates_long_summary():
     # 텔레그램 4096자 제한을 넘기면 400으로 영구히 막히므로 방어적으로 자른다.
     page = {
         "name": "주간 백규균",
         "summary": "가" * 1500,
-        "checklist": "나" * 1500,
         "created_time": "2026-09-09T00:00:00.000Z",
         "url": "https://www.notion.so/1122334455667788",
     }
@@ -187,7 +181,6 @@ def test_format_message_truncates_long_fields():
     message = format_message(page)
 
     assert "요약: " + "가" * 1000 + "…" in message
-    assert "체크할것: " + "나" * 1000 + "…" in message
     assert "가" * 1001 not in message
 
 
