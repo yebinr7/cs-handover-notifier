@@ -276,7 +276,7 @@ def test_run_advances_state_to_latest_on_full_success(mock_fetch, mock_send, moc
     mock_condense.side_effect = lambda api_key, text: text
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    result = run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
+    result = run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
 
     saved = json.loads(state_file.read_text(encoding="utf-8"))
     assert saved == {"last_checked": "2026-09-09T09:00:00.000Z"}
@@ -295,7 +295,7 @@ def test_run_stops_state_before_failed_message(mock_fetch, mock_send, mock_block
     mock_condense.side_effect = lambda api_key, text: text
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    result = run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
+    result = run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
 
     saved = json.loads(state_file.read_text(encoding="utf-8"))
     assert saved == {"last_checked": "2026-09-09T03:00:00.000Z"}
@@ -307,7 +307,7 @@ def test_run_keeps_state_when_notion_fetch_fails(mock_fetch, tmp_path):
     mock_fetch.side_effect = requests.RequestException("notion down")
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    result = run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
+    result = run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
 
     saved = json.loads(state_file.read_text(encoding="utf-8"))
     assert saved == {"last_checked": "2026-09-01T00:00:00.000Z"}
@@ -320,7 +320,7 @@ def test_run_returns_true_when_nothing_to_send(mock_fetch, mock_send, tmp_path):
     mock_fetch.return_value = []
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    result = run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
+    result = run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
 
     assert result is True
     assert mock_send.call_count == 0
@@ -368,7 +368,7 @@ def test_run_rolls_back_state_when_failed_page_shares_created_time(
     mock_condense.side_effect = lambda api_key, text: text
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    result = run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
+    result = run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
 
     assert result is False
     saved = json.loads(state_file.read_text(encoding="utf-8"))
@@ -392,9 +392,9 @@ def test_run_uses_body_text_over_properties_when_present(
     mock_condense.return_value = "다듬어진 요약"
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
+    run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
 
-    mock_condense.assert_called_once_with("anthropic-key", "본문 상세 내용입니다")
+    mock_condense.assert_called_once_with("google-key", "본문 상세 내용입니다")
     sent_message = mock_send.call_args.args[2]
     assert "다듬어진 요약" in sent_message
 
@@ -414,10 +414,10 @@ def test_run_falls_back_to_properties_when_body_empty(
     mock_condense.return_value = "다듬어진 요약"
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
+    run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
 
     mock_condense.assert_called_once_with(
-        "anthropic-key", "서보 다 전원 나간 이유..\n알람 없음 확인필요..."
+        "google-key", "서보 다 전원 나간 이유..\n알람 없음 확인필요..."
     )
 
 
@@ -438,7 +438,7 @@ def test_run_sends_images_after_successful_text_send(
     mock_photo.return_value = True
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    result = run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
+    result = run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
 
     assert result is True
     mock_photo.assert_called_once_with("bot-token", "chat-id", "https://example.com/a.png")
@@ -462,7 +462,7 @@ def test_run_advances_state_even_if_image_send_fails(
     mock_photo.return_value = False
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    result = run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
+    result = run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
 
     assert result is True
     saved = json.loads(state_file.read_text(encoding="utf-8"))
@@ -489,7 +489,7 @@ def test_run_falls_back_when_body_processing_raises_non_request_exception(
     mock_condense.side_effect = lambda api_key, text: text
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    result = run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
+    result = run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
 
     assert result is True
     # 두 번째 페이지도 속성 폴백으로 정상 발송되어야 한다
@@ -510,7 +510,7 @@ def test_run_falls_back_when_body_processing_raises_non_request_exception(
 def test_run_escapes_html_special_characters_from_ai_summary(
     mock_fetch, mock_send, mock_blocks, mock_condense, mock_photo, tmp_path
 ):
-    # Claude가 돌려주는 요약문에 <, >, & 가 섞여 있으면 이스케이프 없이 나갈 경우
+    # Gemini가 돌려주는 요약문에 <, >, & 가 섞여 있으면 이스케이프 없이 나갈 경우
     # 텔레그램 HTML 파서가 400을 뱉고 파이프라인이 막힌다(v1에서 실제로 터진 사례).
     mock_fetch.return_value = [FIXTURE_PAGES[0]]
     mock_send.return_value = True
@@ -520,7 +520,7 @@ def test_run_escapes_html_special_characters_from_ai_summary(
     mock_condense.return_value = "<b>알람</b> & 확인 필요_상태"
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
+    run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
 
     sent_message = mock_send.call_args.args[2]
     # html.escape는 <, >, & 만 바꾸고 밑줄은 건드리지 않는다
@@ -537,7 +537,7 @@ def test_run_escapes_html_special_characters_from_ai_summary(
 def test_run_skips_condense_when_no_body_and_no_properties(
     mock_fetch, mock_send, mock_blocks, mock_condense, mock_photo, tmp_path
 ):
-    # 본문도 없고 "요약"/"체크할것" 속성도 비어있으면 빈 문자열을 Claude에 보낼 이유가 없다
+    # 본문도 없고 "요약"/"체크할것" 속성도 비어있으면 빈 문자열을 Gemini에 보낼 이유가 없다
     # (불필요한 과금 + 무의미한 응답). page-a는 속성이 있어 1회 호출, page-b는 0회여야 한다.
     mock_fetch.return_value = FIXTURE_PAGES
     mock_send.return_value = True
@@ -545,7 +545,7 @@ def test_run_skips_condense_when_no_body_and_no_properties(
     mock_condense.return_value = "요약됨"
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
+    run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
 
     # 속성이 비어있는 page-b 때문에 추가 호출이 생기면 안 된다
     assert mock_condense.call_count == 1
@@ -562,7 +562,7 @@ ENV_OK = {
     "NOTION_DATABASE_ID": "db-id",
     "TELEGRAM_BOT_TOKEN": "bot-token",
     "TELEGRAM_CHAT_ID": "chat-id",
-    "ANTHROPIC_API_KEY": "anthropic-key",
+    "GEMINI_API_KEY": "google-key",
 }
 
 
@@ -578,7 +578,7 @@ def test_main_passes_env_vars_to_run(mock_run):
         "database_id": "db-id",
         "bot_token": "bot-token",
         "chat_id": "chat-id",
-        "anthropic_api_key": "anthropic-key",
+        "google_api_key": "google-key",
     }
 
 
@@ -607,9 +607,9 @@ def test_main_exits_1_when_required_env_var_missing(mock_run):
 
 
 @patch("notify.run")
-def test_main_exits_1_when_anthropic_key_missing(mock_run):
+def test_main_exits_1_when_gemini_key_missing(mock_run):
     env = dict(ENV_OK)
-    del env["ANTHROPIC_API_KEY"]
+    del env["GEMINI_API_KEY"]
 
     with patch.dict(os.environ, env, clear=True):
         with pytest.raises(SystemExit) as excinfo:
@@ -729,60 +729,65 @@ from notify import condense_text
 
 
 @patch("notify.requests.post")
-def test_condense_text_returns_claude_response(mock_post):
+def test_condense_text_returns_gemini_response(mock_post):
     mock_response = MagicMock()
     mock_response.raise_for_status.return_value = None
     mock_response.json.return_value = {
-        "content": [{"type": "text", "text": "서보 알람 확인 후 케이블 점검 필요"}]
+        "candidates": [
+            {"content": {"parts": [{"text": "서보 알람 확인 후 케이블 점검 필요"}]}}
+        ]
     }
     mock_post.return_value = mock_response
 
-    result = condense_text("fake-anthropic-key", "긴 원본 텍스트...")
+    result = condense_text("fake-google-key", "긴 원본 텍스트...")
 
     assert result == "서보 알람 확인 후 케이블 점검 필요"
     called_url = mock_post.call_args.args[0]
-    assert called_url == "https://api.anthropic.com/v1/messages"
+    assert called_url == (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        "gemini-2.5-flash:generateContent"
+    )
     called_headers = mock_post.call_args.kwargs["headers"]
-    assert called_headers["x-api-key"] == "fake-anthropic-key"
+    assert called_headers["x-goog-api-key"] == "fake-google-key"
     called_payload = mock_post.call_args.kwargs["json"]
-    assert called_payload["model"] == "claude-haiku-4-5-20251001"
-    assert "긴 원본 텍스트..." in called_payload["messages"][0]["content"]
+    assert "긴 원본 텍스트..." in called_payload["contents"][0]["parts"][0]["text"]
 
 
 @patch("notify.requests.post")
 def test_condense_text_falls_back_to_original_on_failure(mock_post):
     mock_post.side_effect = requests.RequestException("timeout")
 
-    result = condense_text("fake-anthropic-key", "원본 텍스트")
+    result = condense_text("fake-google-key", "원본 텍스트")
 
     assert result == "원본 텍스트"
 
 
 @patch("notify.requests.post")
 def test_condense_text_falls_back_when_response_shape_unexpected(mock_post):
-    # Anthropic API가 형식이 다른 응답을 주는 경우(예: content가 비어있음)에도
-    # 예외로 죽지 말고 원문을 그대로 써야 발송이 막히지 않는다
+    # Gemini API가 형식이 다른 응답을 주는 경우(예: candidates가 비어있음, 세이프티
+    # 필터로 콘텐츠가 차단된 경우 등)에도 예외로 죽지 말고 원문을 그대로 써야
+    # 발송이 막히지 않는다
     mock_response = MagicMock()
     mock_response.raise_for_status.return_value = None
-    mock_response.json.return_value = {"content": []}
+    mock_response.json.return_value = {"candidates": []}
     mock_post.return_value = mock_response
 
-    result = condense_text("fake-anthropic-key", "원본 텍스트")
+    result = condense_text("fake-google-key", "원본 텍스트")
 
     assert result == "원본 텍스트"
 
 
 @patch("notify.requests.post")
-def test_condense_text_catches_type_error_when_content_is_null(mock_post):
+def test_condense_text_catches_type_error_when_candidates_is_null(mock_post):
     # 구형 except (RequestException, KeyError, IndexError) 튜플로는 포착 못 했던 버그 사례:
-    # response.json()이 {"content": null}을 반환하면 None[0] 시도 시 TypeError 발생.
+    # response.json()이 {"candidates": null}을 반환하면 None[0] 시도 시 TypeError 발생.
     # broadened except Exception으로 이를 포착하고 원문 반환하도록 수정.
     mock_response = MagicMock()
     mock_response.raise_for_status.return_value = None
-    mock_response.json.return_value = {"content": None}  # TypeError 발생 지점
+    mock_response.json.return_value = {"candidates": None}  # TypeError 발생 지점
     mock_post.return_value = mock_response
 
-    result = condense_text("fake-anthropic-key", "원본 텍스트")
+    result = condense_text("fake-google-key", "원본 텍스트")
 
     assert result == "원본 텍스트"
 
@@ -790,9 +795,9 @@ def test_condense_text_catches_type_error_when_content_is_null(mock_post):
 @patch("notify.requests.post")
 def test_condense_text_redacts_api_key_in_error_log(mock_post, capsys):
     # 텔레그램 함수들과 동일한 방어 패턴 — 예외 메시지에 키가 섞여도 로그로 새지 않게.
-    fake_key = "sk-ant-api03-SECRET-KEY-VALUE"
+    fake_key = "AIzaSy-FAKE-SECRET-KEY-VALUE"
     mock_post.side_effect = requests.RequestException(
-        f"401 Unauthorized (x-api-key={fake_key})"
+        f"401 Unauthorized (key={fake_key})"
     )
 
     result = condense_text(fake_key, "원본 텍스트")
