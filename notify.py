@@ -120,7 +120,14 @@ def send_telegram_photo(bot_token, chat_id, photo_url):
         return False
 
 
-def run(notion_token, database_id, bot_token, chat_id, state_path=STATE_FILE):
+def build_summary_source(page, body_text):
+    if body_text:
+        return body_text
+    parts = [part for part in (page["summary"], page["checklist"]) if part]
+    return "\n".join(parts)
+
+
+def run(notion_token, database_id, bot_token, chat_id, anthropic_api_key, state_path=STATE_FILE):
     state = load_state(state_path)
     since_iso = state["last_checked"]
 
@@ -135,8 +142,22 @@ def run(notion_token, database_id, bot_token, chat_id, state_path=STATE_FILE):
     ok = True
     latest_sent = since_iso
     for page in pages:
+        try:
+            blocks = fetch_page_blocks(notion_token, page["id"])
+        except requests.RequestException as exc:
+            print(f"[WARN] 본문 조회 실패, 속성으로 대체: {exc}", file=sys.stderr)
+            blocks = []
+
+        body_text = extract_body_text(blocks)
+        image_urls = extract_image_urls(blocks)
+
+        source_text = build_summary_source(page, body_text)
+        page["summary"] = condense_text(anthropic_api_key, source_text) if source_text else ""
+
         message = format_message(page)
         if send_telegram_message(bot_token, chat_id, message):
+            for image_url in image_urls:
+                send_telegram_photo(bot_token, chat_id, image_url)
             latest_sent = page["created_time"]
         else:
             if latest_sent == page["created_time"]:
@@ -223,7 +244,13 @@ def condense_text(anthropic_api_key, text):
 
 
 def main():
-    required = ["NOTION_API_KEY", "NOTION_DATABASE_ID", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]
+    required = [
+        "NOTION_API_KEY",
+        "NOTION_DATABASE_ID",
+        "TELEGRAM_BOT_TOKEN",
+        "TELEGRAM_CHAT_ID",
+        "ANTHROPIC_API_KEY",
+    ]
     missing = [key for key in required if not os.environ.get(key)]
     if missing:
         print(f"[ERROR] 환경변수 누락: {', '.join(missing)}", file=sys.stderr)
@@ -234,6 +261,7 @@ def main():
         database_id=os.environ["NOTION_DATABASE_ID"],
         bot_token=os.environ["TELEGRAM_BOT_TOKEN"],
         chat_id=os.environ["TELEGRAM_CHAT_ID"],
+        anthropic_api_key=os.environ["ANTHROPIC_API_KEY"],
     )
     if not ok:
         sys.exit(1)

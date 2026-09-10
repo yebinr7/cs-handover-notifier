@@ -237,6 +237,7 @@ from notify import run
 
 FIXTURE_PAGES = [
     {
+        "id": "page-a",
         "created_time": "2026-09-09T03:00:00.000Z",
         "url": "https://www.notion.so/abcdef1234567890",
         "properties": {
@@ -246,6 +247,7 @@ FIXTURE_PAGES = [
         },
     },
     {
+        "id": "page-b",
         "created_time": "2026-09-09T09:00:00.000Z",
         "url": "https://www.notion.so/1122334455667788",
         "properties": {
@@ -263,14 +265,18 @@ def make_state_file(tmp_path, last_checked):
     return state_file
 
 
+@patch("notify.condense_text")
+@patch("notify.fetch_page_blocks")
 @patch("notify.send_telegram_message")
 @patch("notify.fetch_new_pages")
-def test_run_advances_state_to_latest_on_full_success(mock_fetch, mock_send, tmp_path):
+def test_run_advances_state_to_latest_on_full_success(mock_fetch, mock_send, mock_blocks, mock_condense, tmp_path):
     mock_fetch.return_value = FIXTURE_PAGES
     mock_send.return_value = True
+    mock_blocks.return_value = []
+    mock_condense.side_effect = lambda api_key, text: text
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    result = run("token", "db-id", "bot-token", "chat-id", state_path=str(state_file))
+    result = run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
 
     saved = json.loads(state_file.read_text(encoding="utf-8"))
     assert saved == {"last_checked": "2026-09-09T09:00:00.000Z"}
@@ -278,14 +284,18 @@ def test_run_advances_state_to_latest_on_full_success(mock_fetch, mock_send, tmp
     assert result is True
 
 
+@patch("notify.condense_text")
+@patch("notify.fetch_page_blocks")
 @patch("notify.send_telegram_message")
 @patch("notify.fetch_new_pages")
-def test_run_stops_state_before_failed_message(mock_fetch, mock_send, tmp_path):
+def test_run_stops_state_before_failed_message(mock_fetch, mock_send, mock_blocks, mock_condense, tmp_path):
     mock_fetch.return_value = FIXTURE_PAGES
     mock_send.side_effect = [True, False]
+    mock_blocks.return_value = []
+    mock_condense.side_effect = lambda api_key, text: text
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    result = run("token", "db-id", "bot-token", "chat-id", state_path=str(state_file))
+    result = run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
 
     saved = json.loads(state_file.read_text(encoding="utf-8"))
     assert saved == {"last_checked": "2026-09-09T03:00:00.000Z"}
@@ -297,7 +307,7 @@ def test_run_keeps_state_when_notion_fetch_fails(mock_fetch, tmp_path):
     mock_fetch.side_effect = requests.RequestException("notion down")
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    result = run("token", "db-id", "bot-token", "chat-id", state_path=str(state_file))
+    result = run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
 
     saved = json.loads(state_file.read_text(encoding="utf-8"))
     assert saved == {"last_checked": "2026-09-01T00:00:00.000Z"}
@@ -310,7 +320,7 @@ def test_run_returns_true_when_nothing_to_send(mock_fetch, mock_send, tmp_path):
     mock_fetch.return_value = []
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    result = run("token", "db-id", "bot-token", "chat-id", state_path=str(state_file))
+    result = run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
 
     assert result is True
     assert mock_send.call_count == 0
@@ -320,6 +330,7 @@ def test_run_returns_true_when_nothing_to_send(mock_fetch, mock_send, tmp_path):
 
 SAME_MINUTE_PAGES = [
     {
+        "id": "page-same-1",
         "created_time": "2026-09-09T03:00:00.000Z",
         "url": "https://www.notion.so/aaaa",
         "properties": {
@@ -329,6 +340,7 @@ SAME_MINUTE_PAGES = [
         },
     },
     {
+        "id": "page-same-2",
         "created_time": "2026-09-09T03:00:00.000Z",
         "url": "https://www.notion.so/bbbb",
         "properties": {
@@ -340,21 +352,121 @@ SAME_MINUTE_PAGES = [
 ]
 
 
+@patch("notify.condense_text")
+@patch("notify.fetch_page_blocks")
 @patch("notify.send_telegram_message")
 @patch("notify.fetch_new_pages")
-def test_run_rolls_back_state_when_failed_page_shares_created_time(mock_fetch, mock_send, tmp_path):
+def test_run_rolls_back_state_when_failed_page_shares_created_time(
+    mock_fetch, mock_send, mock_blocks, mock_condense, tmp_path
+):
     # created_time은 분 단위라 같은 분에 만든 두 글의 타임스탬프가 동일할 수 있다.
     # 첫 글 성공 후 그 타임스탬프로 state를 올려버리면, 실패한 둘째 글이
     # 다음 사이클 필터(after, 배타적)에서 영원히 제외되어 유실된다.
     mock_fetch.return_value = SAME_MINUTE_PAGES
     mock_send.side_effect = [True, False]
+    mock_blocks.return_value = []
+    mock_condense.side_effect = lambda api_key, text: text
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    result = run("token", "db-id", "bot-token", "chat-id", state_path=str(state_file))
+    result = run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
 
     assert result is False
     saved = json.loads(state_file.read_text(encoding="utf-8"))
     assert saved == {"last_checked": "2026-09-01T00:00:00.000Z"}
+
+
+@patch("notify.send_telegram_photo")
+@patch("notify.condense_text")
+@patch("notify.fetch_page_blocks")
+@patch("notify.send_telegram_message")
+@patch("notify.fetch_new_pages")
+def test_run_uses_body_text_over_properties_when_present(
+    mock_fetch, mock_send, mock_blocks, mock_condense, mock_photo, tmp_path
+):
+    # 본문에 텍스트가 있으면 "요약"/"체크할것" 속성이 아니라 본문을 요약 재료로 써야 한다.
+    mock_fetch.return_value = [FIXTURE_PAGES[0]]
+    mock_send.return_value = True
+    mock_blocks.return_value = [
+        {"type": "paragraph", "paragraph": {"rich_text": [{"plain_text": "본문 상세 내용입니다"}]}}
+    ]
+    mock_condense.return_value = "다듬어진 요약"
+    state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
+
+    run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
+
+    mock_condense.assert_called_once_with("anthropic-key", "본문 상세 내용입니다")
+    sent_message = mock_send.call_args.args[2]
+    assert "다듬어진 요약" in sent_message
+
+
+@patch("notify.send_telegram_photo")
+@patch("notify.condense_text")
+@patch("notify.fetch_page_blocks")
+@patch("notify.send_telegram_message")
+@patch("notify.fetch_new_pages")
+def test_run_falls_back_to_properties_when_body_empty(
+    mock_fetch, mock_send, mock_blocks, mock_condense, mock_photo, tmp_path
+):
+    # 본문이 비어있으면 "요약"/"체크할것" 속성을 이어붙여서 요약 재료로 쓴다.
+    mock_fetch.return_value = [FIXTURE_PAGES[0]]
+    mock_send.return_value = True
+    mock_blocks.return_value = []
+    mock_condense.return_value = "다듬어진 요약"
+    state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
+
+    run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
+
+    mock_condense.assert_called_once_with(
+        "anthropic-key", "서보 다 전원 나간 이유..\n알람 없음 확인필요..."
+    )
+
+
+@patch("notify.send_telegram_photo")
+@patch("notify.condense_text")
+@patch("notify.fetch_page_blocks")
+@patch("notify.send_telegram_message")
+@patch("notify.fetch_new_pages")
+def test_run_sends_images_after_successful_text_send(
+    mock_fetch, mock_send, mock_blocks, mock_condense, mock_photo, tmp_path
+):
+    mock_fetch.return_value = [FIXTURE_PAGES[0]]
+    mock_send.return_value = True
+    mock_blocks.return_value = [
+        {"type": "image", "image": {"type": "external", "external": {"url": "https://example.com/a.png"}}}
+    ]
+    mock_condense.return_value = "요약됨"
+    mock_photo.return_value = True
+    state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
+
+    result = run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
+
+    assert result is True
+    mock_photo.assert_called_once_with("bot-token", "chat-id", "https://example.com/a.png")
+
+
+@patch("notify.send_telegram_photo")
+@patch("notify.condense_text")
+@patch("notify.fetch_page_blocks")
+@patch("notify.send_telegram_message")
+@patch("notify.fetch_new_pages")
+def test_run_advances_state_even_if_image_send_fails(
+    mock_fetch, mock_send, mock_blocks, mock_condense, mock_photo, tmp_path
+):
+    # 이미지는 부가정보라 전송 실패해도 텍스트가 이미 성공했으면 state는 전진해야 한다
+    mock_fetch.return_value = [FIXTURE_PAGES[0]]
+    mock_send.return_value = True
+    mock_blocks.return_value = [
+        {"type": "image", "image": {"type": "external", "external": {"url": "https://example.com/a.png"}}}
+    ]
+    mock_condense.return_value = "요약됨"
+    mock_photo.return_value = False
+    state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
+
+    result = run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
+
+    assert result is True
+    saved = json.loads(state_file.read_text(encoding="utf-8"))
+    assert saved == {"last_checked": "2026-09-09T03:00:00.000Z"}
 
 
 from notify import main
@@ -364,6 +476,7 @@ ENV_OK = {
     "NOTION_DATABASE_ID": "db-id",
     "TELEGRAM_BOT_TOKEN": "bot-token",
     "TELEGRAM_CHAT_ID": "chat-id",
+    "ANTHROPIC_API_KEY": "anthropic-key",
 }
 
 
@@ -379,6 +492,7 @@ def test_main_passes_env_vars_to_run(mock_run):
         "database_id": "db-id",
         "bot_token": "bot-token",
         "chat_id": "chat-id",
+        "anthropic_api_key": "anthropic-key",
     }
 
 
@@ -403,7 +517,19 @@ def test_main_exits_1_when_required_env_var_missing(mock_run):
             main()
 
     assert excinfo.value.code == 1
-    # 환경변수가 비면 Notion/텔레그램을 건드리기 전에 즉시 종료해야 한다
+    assert mock_run.call_count == 0
+
+
+@patch("notify.run")
+def test_main_exits_1_when_anthropic_key_missing(mock_run):
+    env = dict(ENV_OK)
+    del env["ANTHROPIC_API_KEY"]
+
+    with patch.dict(os.environ, env, clear=True):
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+
+    assert excinfo.value.code == 1
     assert mock_run.call_count == 0
 
 
