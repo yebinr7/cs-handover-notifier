@@ -33,6 +33,7 @@ def parse_page(page):
     checklist = _plain_text(props["체크할것"]["rich_text"])
 
     return {
+        "id": page["id"],
         "name": name,
         "summary": summary,
         "checklist": checklist,

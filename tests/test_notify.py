@@ -39,6 +39,7 @@ def test_parse_page_extracts_fields():
     result = parse_page(pages[0])
 
     assert result == {
+        "id": "page-id-1",
         "name": "야간 김예빈",
         "summary": "서보 다 전원 나간 이유..",
         "checklist": "알람 없음 확인필요...",
@@ -52,6 +53,7 @@ def test_parse_page_handles_empty_fields():
 
     result = parse_page(pages[1])
 
+    assert result["id"] == "page-id-2"
     assert result["summary"] == ""
     assert result["checklist"] == ""
     assert result["name"] == "주간 백규균"
@@ -61,6 +63,7 @@ def test_parse_page_concatenates_multi_element_rich_text():
     # Notion은 굵게/링크/줄바꿈 등 서식이 바뀌는 지점마다 rich_text를 여러 조각으로 쪼갠다.
     # 첫 번째 조각만 읽으면 나머지 텍스트가 조용히 사라지므로 전부 이어붙여야 한다.
     page = {
+        "id": "page-multi",
         "created_time": "2026-09-09T03:00:00.000Z",
         "url": "https://www.notion.so/abcdef1234567890",
         "properties": {
@@ -72,6 +75,7 @@ def test_parse_page_concatenates_multi_element_rich_text():
 
     result = parse_page(page)
 
+    assert result["id"] == "page-multi"
     assert result["name"] == "야간 김예빈"
     assert result["summary"] == "서보 전원 나간 이유"
     assert result["checklist"] == "알람 확인"
