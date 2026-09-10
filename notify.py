@@ -144,12 +144,15 @@ def run(notion_token, database_id, bot_token, chat_id, anthropic_api_key, state_
     for page in pages:
         try:
             blocks = fetch_page_blocks(notion_token, page["id"])
-        except requests.RequestException as exc:
+            body_text = extract_body_text(blocks)
+            image_urls = extract_image_urls(blocks)
+        except Exception as exc:
+            # 본문 보강은 best-effort다. 블록 모양이 예상과 달라 KeyError/TypeError 등이
+            # 나더라도 run() 밖으로 터뜨리면, 앞서 성공적으로 보낸 페이지의 latest_sent가
+            # 저장되지 못해 다음 사이클에 중복 발송된다. 무조건 속성 폴백으로 계속 진행한다.
             print(f"[WARN] 본문 조회 실패, 속성으로 대체: {exc}", file=sys.stderr)
-            blocks = []
-
-        body_text = extract_body_text(blocks)
-        image_urls = extract_image_urls(blocks)
+            body_text = ""
+            image_urls = []
 
         source_text = build_summary_source(page, body_text)
         page["summary"] = condense_text(anthropic_api_key, source_text) if source_text else ""
@@ -179,7 +182,12 @@ def fetch_page_blocks(notion_token, page_id):
     }
     response = requests.get(url, headers=headers, timeout=15)
     response.raise_for_status()
-    return response.json()["results"]
+    data = response.json()
+    if data.get("has_more"):
+        # 페이지네이션은 의도적으로 범위 밖(설계서: "100개 초과 블록 페이지네이션" 제외)이지만,
+        # 조용히 잘리면 원인 파악이 안 되므로 잘렸다는 사실만 로그로 남긴다.
+        print(f"[WARN] 페이지 {page_id}의 본문이 100블록을 넘어 일부만 요약됩니다", file=sys.stderr)
+    return data["results"]
 
 
 def extract_body_text(blocks):
@@ -239,7 +247,9 @@ def condense_text(anthropic_api_key, text):
         response.raise_for_status()
         return response.json()["content"][0]["text"].strip()
     except Exception as exc:
-        print(f"[WARN] AI 요약 실패, 원문 사용: {exc}", file=sys.stderr)
+        # 텔레그램 함수들과 동일한 방어 패턴: 예외 메시지에 키가 섞여 들어갈 가능성을 차단
+        safe_message = str(exc).replace(anthropic_api_key, "***")
+        print(f"[WARN] AI 요약 실패, 원문 사용: {safe_message}", file=sys.stderr)
         return text
 
 

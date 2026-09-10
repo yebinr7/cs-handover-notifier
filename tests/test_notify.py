@@ -469,6 +469,92 @@ def test_run_advances_state_even_if_image_send_fails(
     assert saved == {"last_checked": "2026-09-09T03:00:00.000Z"}
 
 
+@patch("notify.send_telegram_photo")
+@patch("notify.condense_text")
+@patch("notify.fetch_page_blocks")
+@patch("notify.send_telegram_message")
+@patch("notify.fetch_new_pages")
+def test_run_falls_back_when_body_processing_raises_non_request_exception(
+    mock_fetch, mock_send, mock_blocks, mock_condense, mock_photo, tmp_path, capsys
+):
+    # 블록 데이터 모양이 예상과 다르면(KeyError 등) RequestException이 아니라서
+    # 구형 except 절로는 못 잡고 run() 밖으로 터졌다. 그러면 앞 페이지(page-a)의
+    # 성공 발송분까지 save_state()에 도달하지 못해 다음 사이클에 중복 발송된다.
+    mock_fetch.return_value = FIXTURE_PAGES
+    mock_send.return_value = True
+    mock_blocks.side_effect = [
+        [{"type": "paragraph", "paragraph": {"rich_text": [{"plain_text": "본문 상세"}]}}],
+        KeyError("boom"),
+    ]
+    mock_condense.side_effect = lambda api_key, text: text
+    state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
+
+    result = run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
+
+    assert result is True
+    # 두 번째 페이지도 속성 폴백으로 정상 발송되어야 한다
+    assert mock_send.call_count == 2
+    second_message = mock_send.call_args_list[1].args[2]
+    assert "주간 백규균" in second_message
+    # 핵심: 앞 페이지의 성공분이 유실되지 않고 state가 끝까지 전진해야 한다
+    saved = json.loads(state_file.read_text(encoding="utf-8"))
+    assert saved == {"last_checked": "2026-09-09T09:00:00.000Z"}
+    assert "본문 조회 실패" in capsys.readouterr().err
+
+
+@patch("notify.send_telegram_photo")
+@patch("notify.condense_text")
+@patch("notify.fetch_page_blocks")
+@patch("notify.send_telegram_message")
+@patch("notify.fetch_new_pages")
+def test_run_escapes_html_special_characters_from_ai_summary(
+    mock_fetch, mock_send, mock_blocks, mock_condense, mock_photo, tmp_path
+):
+    # Claude가 돌려주는 요약문에 <, >, & 가 섞여 있으면 이스케이프 없이 나갈 경우
+    # 텔레그램 HTML 파서가 400을 뱉고 파이프라인이 막힌다(v1에서 실제로 터진 사례).
+    mock_fetch.return_value = [FIXTURE_PAGES[0]]
+    mock_send.return_value = True
+    mock_blocks.return_value = [
+        {"type": "paragraph", "paragraph": {"rich_text": [{"plain_text": "본문"}]}}
+    ]
+    mock_condense.return_value = "<b>알람</b> & 확인 필요_상태"
+    state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
+
+    run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
+
+    sent_message = mock_send.call_args.args[2]
+    # html.escape는 <, >, & 만 바꾸고 밑줄은 건드리지 않는다
+    assert "&lt;b&gt;알람&lt;/b&gt; &amp; 확인 필요_상태" in sent_message
+    assert "<b>알람</b>" not in sent_message
+    assert "</b> & 확인" not in sent_message
+
+
+@patch("notify.send_telegram_photo")
+@patch("notify.condense_text")
+@patch("notify.fetch_page_blocks")
+@patch("notify.send_telegram_message")
+@patch("notify.fetch_new_pages")
+def test_run_skips_condense_when_no_body_and_no_properties(
+    mock_fetch, mock_send, mock_blocks, mock_condense, mock_photo, tmp_path
+):
+    # 본문도 없고 "요약"/"체크할것" 속성도 비어있으면 빈 문자열을 Claude에 보낼 이유가 없다
+    # (불필요한 과금 + 무의미한 응답). page-a는 속성이 있어 1회 호출, page-b는 0회여야 한다.
+    mock_fetch.return_value = FIXTURE_PAGES
+    mock_send.return_value = True
+    mock_blocks.return_value = []
+    mock_condense.return_value = "요약됨"
+    state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
+
+    run("token", "db-id", "bot-token", "chat-id", "anthropic-key", state_path=str(state_file))
+
+    # 속성이 비어있는 page-b 때문에 추가 호출이 생기면 안 된다
+    assert mock_condense.call_count == 1
+    assert mock_condense.call_args.args[1] == "서보 다 전원 나간 이유..\n알람 없음 확인필요..."
+    # page-b 메시지에는 요약 줄 자체가 없어야 한다
+    second_message = mock_send.call_args_list[1].args[2]
+    assert "요약: " not in second_message
+
+
 from notify import main
 
 ENV_OK = {
@@ -606,6 +692,39 @@ def test_fetch_page_blocks_returns_results_list(mock_get):
     assert called_headers["Notion-Version"] == "2022-06-28"
 
 
+@patch("notify.requests.get")
+def test_fetch_page_blocks_warns_when_response_has_more(mock_get, capsys):
+    # 100블록 초과 페이지네이션은 범위 밖이지만, 조용히 잘리면 원인 추적이 불가능하다.
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"results": [{"type": "paragraph"}], "has_more": True}
+    mock_response.raise_for_status.return_value = None
+    mock_get.return_value = mock_response
+
+    result = fetch_page_blocks("fake-token", "fake-page-id")
+
+    # 동작은 그대로: 첫 100개만 반환
+    assert result == [{"type": "paragraph"}]
+    captured = capsys.readouterr()
+    assert "[WARN]" in captured.err
+    assert "fake-page-id" in captured.err
+    assert "100블록" in captured.err
+
+
+@patch("notify.requests.get")
+def test_fetch_page_blocks_does_not_warn_when_no_more_blocks(mock_get, capsys):
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"results": [{"type": "paragraph"}], "has_more": False}
+    mock_response.raise_for_status.return_value = None
+    mock_get.return_value = mock_response
+
+    result = fetch_page_blocks("fake-token", "fake-page-id")
+
+    assert result == [{"type": "paragraph"}]
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert captured.out == ""
+
+
 from notify import condense_text
 
 
@@ -666,6 +785,23 @@ def test_condense_text_catches_type_error_when_content_is_null(mock_post):
     result = condense_text("fake-anthropic-key", "원본 텍스트")
 
     assert result == "원본 텍스트"
+
+
+@patch("notify.requests.post")
+def test_condense_text_redacts_api_key_in_error_log(mock_post, capsys):
+    # 텔레그램 함수들과 동일한 방어 패턴 — 예외 메시지에 키가 섞여도 로그로 새지 않게.
+    fake_key = "sk-ant-api03-SECRET-KEY-VALUE"
+    mock_post.side_effect = requests.RequestException(
+        f"401 Unauthorized (x-api-key={fake_key})"
+    )
+
+    result = condense_text(fake_key, "원본 텍스트")
+
+    assert result == "원본 텍스트"
+    captured = capsys.readouterr()
+    assert fake_key not in captured.err
+    assert fake_key not in captured.out
+    assert "***" in captured.err
 
 
 from notify import send_telegram_photo
