@@ -39,6 +39,7 @@ def test_parse_page_extracts_fields():
     result = parse_page(pages[0])
 
     assert result == {
+        "id": "page-id-1",
         "name": "야간 김예빈",
         "summary": "서보 다 전원 나간 이유..",
         "checklist": "알람 없음 확인필요...",
@@ -52,6 +53,7 @@ def test_parse_page_handles_empty_fields():
 
     result = parse_page(pages[1])
 
+    assert result["id"] == "page-id-2"
     assert result["summary"] == ""
     assert result["checklist"] == ""
     assert result["name"] == "주간 백규균"
@@ -61,6 +63,7 @@ def test_parse_page_concatenates_multi_element_rich_text():
     # Notion은 굵게/링크/줄바꿈 등 서식이 바뀌는 지점마다 rich_text를 여러 조각으로 쪼갠다.
     # 첫 번째 조각만 읽으면 나머지 텍스트가 조용히 사라지므로 전부 이어붙여야 한다.
     page = {
+        "id": "page-multi",
         "created_time": "2026-09-09T03:00:00.000Z",
         "url": "https://www.notion.so/abcdef1234567890",
         "properties": {
@@ -72,6 +75,7 @@ def test_parse_page_concatenates_multi_element_rich_text():
 
     result = parse_page(page)
 
+    assert result["id"] == "page-multi"
     assert result["name"] == "야간 김예빈"
     assert result["summary"] == "서보 전원 나간 이유"
     assert result["checklist"] == "알람 확인"
@@ -116,19 +120,17 @@ from notify import format_message
 def test_format_message_night_shift_with_content():
     page = {
         "name": "야간 김예빈",
-        "summary": "서보 다 전원 나간 이유..",
-        "checklist": "알람 없음 확인필요...",
+        "summary": "서보 알람 확인 후 케이블 점검 필요",
         "created_time": "2026-09-08T15:00:00.000Z",
         "url": "https://www.notion.so/abcdef1234567890",
     }
 
     message = format_message(page)
 
-    # created_time 2026-09-08T15:00Z = KST 2026-09-09 00:00 → 표시 날짜는 09-09 (야간조 날짜 밀림 수정)
+    # created_time 2026-09-08T15:00Z = KST 2026-09-09 00:00 → 표시 날짜는 09-09
     assert message == (
         "🌙 야간 김예빈 (2026-09-09)\n"
-        "요약: 서보 다 전원 나간 이유..\n"
-        "체크할것: 알람 없음 확인필요...\n"
+        "요약: 서보 알람 확인 후 케이블 점검 필요\n"
         '<a href="https://www.notion.so/abcdef1234567890">노션에서 보기</a>'
     )
 
@@ -137,7 +139,6 @@ def test_format_message_day_shift_without_content():
     page = {
         "name": "주간 백규균",
         "summary": "",
-        "checklist": "",
         "created_time": "2026-09-09T00:00:00.000Z",
         "url": "https://www.notion.so/1122334455667788",
     }
@@ -156,7 +157,6 @@ def test_format_message_escapes_html_special_characters():
     page = {
         "name": "야간 Loader_Hoist & DB_1",
         "summary": "M_400_1 <알람> & 확인",
-        "checklist": "",
         "created_time": "2026-09-08T15:00:00.000Z",
         "url": "https://www.notion.so/abcdef1234567890",
     }
@@ -165,17 +165,15 @@ def test_format_message_escapes_html_special_characters():
 
     assert "야간 Loader_Hoist &amp; DB_1" in message
     assert "M_400_1 &lt;알람&gt; &amp; 확인" in message
-    # 이스케이프 안 된 raw &가 남아있으면 안 된다 (&amp; 형태만 허용)
     assert "Hoist & DB" not in message
     assert "<알람>" not in message
 
 
-def test_format_message_truncates_long_fields():
+def test_format_message_truncates_long_summary():
     # 텔레그램 4096자 제한을 넘기면 400으로 영구히 막히므로 방어적으로 자른다.
     page = {
         "name": "주간 백규균",
         "summary": "가" * 1500,
-        "checklist": "나" * 1500,
         "created_time": "2026-09-09T00:00:00.000Z",
         "url": "https://www.notion.so/1122334455667788",
     }
@@ -183,7 +181,6 @@ def test_format_message_truncates_long_fields():
     message = format_message(page)
 
     assert "요약: " + "가" * 1000 + "…" in message
-    assert "체크할것: " + "나" * 1000 + "…" in message
     assert "가" * 1001 not in message
 
 
@@ -240,6 +237,7 @@ from notify import run
 
 FIXTURE_PAGES = [
     {
+        "id": "page-a",
         "created_time": "2026-09-09T03:00:00.000Z",
         "url": "https://www.notion.so/abcdef1234567890",
         "properties": {
@@ -249,6 +247,7 @@ FIXTURE_PAGES = [
         },
     },
     {
+        "id": "page-b",
         "created_time": "2026-09-09T09:00:00.000Z",
         "url": "https://www.notion.so/1122334455667788",
         "properties": {
@@ -266,14 +265,18 @@ def make_state_file(tmp_path, last_checked):
     return state_file
 
 
+@patch("notify.condense_text")
+@patch("notify.fetch_page_blocks")
 @patch("notify.send_telegram_message")
 @patch("notify.fetch_new_pages")
-def test_run_advances_state_to_latest_on_full_success(mock_fetch, mock_send, tmp_path):
+def test_run_advances_state_to_latest_on_full_success(mock_fetch, mock_send, mock_blocks, mock_condense, tmp_path):
     mock_fetch.return_value = FIXTURE_PAGES
     mock_send.return_value = True
+    mock_blocks.return_value = []
+    mock_condense.side_effect = lambda api_key, text: text
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    result = run("token", "db-id", "bot-token", "chat-id", state_path=str(state_file))
+    result = run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
 
     saved = json.loads(state_file.read_text(encoding="utf-8"))
     assert saved == {"last_checked": "2026-09-09T09:00:00.000Z"}
@@ -281,14 +284,18 @@ def test_run_advances_state_to_latest_on_full_success(mock_fetch, mock_send, tmp
     assert result is True
 
 
+@patch("notify.condense_text")
+@patch("notify.fetch_page_blocks")
 @patch("notify.send_telegram_message")
 @patch("notify.fetch_new_pages")
-def test_run_stops_state_before_failed_message(mock_fetch, mock_send, tmp_path):
+def test_run_stops_state_before_failed_message(mock_fetch, mock_send, mock_blocks, mock_condense, tmp_path):
     mock_fetch.return_value = FIXTURE_PAGES
     mock_send.side_effect = [True, False]
+    mock_blocks.return_value = []
+    mock_condense.side_effect = lambda api_key, text: text
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    result = run("token", "db-id", "bot-token", "chat-id", state_path=str(state_file))
+    result = run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
 
     saved = json.loads(state_file.read_text(encoding="utf-8"))
     assert saved == {"last_checked": "2026-09-09T03:00:00.000Z"}
@@ -300,7 +307,7 @@ def test_run_keeps_state_when_notion_fetch_fails(mock_fetch, tmp_path):
     mock_fetch.side_effect = requests.RequestException("notion down")
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    result = run("token", "db-id", "bot-token", "chat-id", state_path=str(state_file))
+    result = run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
 
     saved = json.loads(state_file.read_text(encoding="utf-8"))
     assert saved == {"last_checked": "2026-09-01T00:00:00.000Z"}
@@ -313,7 +320,7 @@ def test_run_returns_true_when_nothing_to_send(mock_fetch, mock_send, tmp_path):
     mock_fetch.return_value = []
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    result = run("token", "db-id", "bot-token", "chat-id", state_path=str(state_file))
+    result = run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
 
     assert result is True
     assert mock_send.call_count == 0
@@ -323,6 +330,7 @@ def test_run_returns_true_when_nothing_to_send(mock_fetch, mock_send, tmp_path):
 
 SAME_MINUTE_PAGES = [
     {
+        "id": "page-same-1",
         "created_time": "2026-09-09T03:00:00.000Z",
         "url": "https://www.notion.so/aaaa",
         "properties": {
@@ -332,6 +340,7 @@ SAME_MINUTE_PAGES = [
         },
     },
     {
+        "id": "page-same-2",
         "created_time": "2026-09-09T03:00:00.000Z",
         "url": "https://www.notion.so/bbbb",
         "properties": {
@@ -343,21 +352,207 @@ SAME_MINUTE_PAGES = [
 ]
 
 
+@patch("notify.condense_text")
+@patch("notify.fetch_page_blocks")
 @patch("notify.send_telegram_message")
 @patch("notify.fetch_new_pages")
-def test_run_rolls_back_state_when_failed_page_shares_created_time(mock_fetch, mock_send, tmp_path):
+def test_run_rolls_back_state_when_failed_page_shares_created_time(
+    mock_fetch, mock_send, mock_blocks, mock_condense, tmp_path
+):
     # created_time은 분 단위라 같은 분에 만든 두 글의 타임스탬프가 동일할 수 있다.
     # 첫 글 성공 후 그 타임스탬프로 state를 올려버리면, 실패한 둘째 글이
     # 다음 사이클 필터(after, 배타적)에서 영원히 제외되어 유실된다.
     mock_fetch.return_value = SAME_MINUTE_PAGES
     mock_send.side_effect = [True, False]
+    mock_blocks.return_value = []
+    mock_condense.side_effect = lambda api_key, text: text
     state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
 
-    result = run("token", "db-id", "bot-token", "chat-id", state_path=str(state_file))
+    result = run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
 
     assert result is False
     saved = json.loads(state_file.read_text(encoding="utf-8"))
     assert saved == {"last_checked": "2026-09-01T00:00:00.000Z"}
+
+
+@patch("notify.send_telegram_photo")
+@patch("notify.condense_text")
+@patch("notify.fetch_page_blocks")
+@patch("notify.send_telegram_message")
+@patch("notify.fetch_new_pages")
+def test_run_uses_body_text_over_properties_when_present(
+    mock_fetch, mock_send, mock_blocks, mock_condense, mock_photo, tmp_path
+):
+    # 본문에 텍스트가 있으면 "요약"/"체크할것" 속성이 아니라 본문을 요약 재료로 써야 한다.
+    mock_fetch.return_value = [FIXTURE_PAGES[0]]
+    mock_send.return_value = True
+    mock_blocks.return_value = [
+        {"type": "paragraph", "paragraph": {"rich_text": [{"plain_text": "본문 상세 내용입니다"}]}}
+    ]
+    mock_condense.return_value = "다듬어진 요약"
+    state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
+
+    run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
+
+    mock_condense.assert_called_once_with("google-key", "본문 상세 내용입니다")
+    sent_message = mock_send.call_args.args[2]
+    assert "다듬어진 요약" in sent_message
+
+
+@patch("notify.send_telegram_photo")
+@patch("notify.condense_text")
+@patch("notify.fetch_page_blocks")
+@patch("notify.send_telegram_message")
+@patch("notify.fetch_new_pages")
+def test_run_falls_back_to_properties_when_body_empty(
+    mock_fetch, mock_send, mock_blocks, mock_condense, mock_photo, tmp_path
+):
+    # 본문이 비어있으면 "요약"/"체크할것" 속성을 이어붙여서 요약 재료로 쓴다.
+    mock_fetch.return_value = [FIXTURE_PAGES[0]]
+    mock_send.return_value = True
+    mock_blocks.return_value = []
+    mock_condense.return_value = "다듬어진 요약"
+    state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
+
+    run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
+
+    mock_condense.assert_called_once_with(
+        "google-key", "서보 다 전원 나간 이유..\n알람 없음 확인필요..."
+    )
+
+
+@patch("notify.send_telegram_photo")
+@patch("notify.condense_text")
+@patch("notify.fetch_page_blocks")
+@patch("notify.send_telegram_message")
+@patch("notify.fetch_new_pages")
+def test_run_sends_images_after_successful_text_send(
+    mock_fetch, mock_send, mock_blocks, mock_condense, mock_photo, tmp_path
+):
+    mock_fetch.return_value = [FIXTURE_PAGES[0]]
+    mock_send.return_value = True
+    mock_blocks.return_value = [
+        {"type": "image", "image": {"type": "external", "external": {"url": "https://example.com/a.png"}}}
+    ]
+    mock_condense.return_value = "요약됨"
+    mock_photo.return_value = True
+    state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
+
+    result = run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
+
+    assert result is True
+    mock_photo.assert_called_once_with("bot-token", "chat-id", "https://example.com/a.png")
+
+
+@patch("notify.send_telegram_photo")
+@patch("notify.condense_text")
+@patch("notify.fetch_page_blocks")
+@patch("notify.send_telegram_message")
+@patch("notify.fetch_new_pages")
+def test_run_advances_state_even_if_image_send_fails(
+    mock_fetch, mock_send, mock_blocks, mock_condense, mock_photo, tmp_path
+):
+    # 이미지는 부가정보라 전송 실패해도 텍스트가 이미 성공했으면 state는 전진해야 한다
+    mock_fetch.return_value = [FIXTURE_PAGES[0]]
+    mock_send.return_value = True
+    mock_blocks.return_value = [
+        {"type": "image", "image": {"type": "external", "external": {"url": "https://example.com/a.png"}}}
+    ]
+    mock_condense.return_value = "요약됨"
+    mock_photo.return_value = False
+    state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
+
+    result = run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
+
+    assert result is True
+    saved = json.loads(state_file.read_text(encoding="utf-8"))
+    assert saved == {"last_checked": "2026-09-09T03:00:00.000Z"}
+
+
+@patch("notify.send_telegram_photo")
+@patch("notify.condense_text")
+@patch("notify.fetch_page_blocks")
+@patch("notify.send_telegram_message")
+@patch("notify.fetch_new_pages")
+def test_run_falls_back_when_body_processing_raises_non_request_exception(
+    mock_fetch, mock_send, mock_blocks, mock_condense, mock_photo, tmp_path, capsys
+):
+    # 블록 데이터 모양이 예상과 다르면(KeyError 등) RequestException이 아니라서
+    # 구형 except 절로는 못 잡고 run() 밖으로 터졌다. 그러면 앞 페이지(page-a)의
+    # 성공 발송분까지 save_state()에 도달하지 못해 다음 사이클에 중복 발송된다.
+    mock_fetch.return_value = FIXTURE_PAGES
+    mock_send.return_value = True
+    mock_blocks.side_effect = [
+        [{"type": "paragraph", "paragraph": {"rich_text": [{"plain_text": "본문 상세"}]}}],
+        KeyError("boom"),
+    ]
+    mock_condense.side_effect = lambda api_key, text: text
+    state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
+
+    result = run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
+
+    assert result is True
+    # 두 번째 페이지도 속성 폴백으로 정상 발송되어야 한다
+    assert mock_send.call_count == 2
+    second_message = mock_send.call_args_list[1].args[2]
+    assert "주간 백규균" in second_message
+    # 핵심: 앞 페이지의 성공분이 유실되지 않고 state가 끝까지 전진해야 한다
+    saved = json.loads(state_file.read_text(encoding="utf-8"))
+    assert saved == {"last_checked": "2026-09-09T09:00:00.000Z"}
+    assert "본문 조회 실패" in capsys.readouterr().err
+
+
+@patch("notify.send_telegram_photo")
+@patch("notify.condense_text")
+@patch("notify.fetch_page_blocks")
+@patch("notify.send_telegram_message")
+@patch("notify.fetch_new_pages")
+def test_run_escapes_html_special_characters_from_ai_summary(
+    mock_fetch, mock_send, mock_blocks, mock_condense, mock_photo, tmp_path
+):
+    # Gemini가 돌려주는 요약문에 <, >, & 가 섞여 있으면 이스케이프 없이 나갈 경우
+    # 텔레그램 HTML 파서가 400을 뱉고 파이프라인이 막힌다(v1에서 실제로 터진 사례).
+    mock_fetch.return_value = [FIXTURE_PAGES[0]]
+    mock_send.return_value = True
+    mock_blocks.return_value = [
+        {"type": "paragraph", "paragraph": {"rich_text": [{"plain_text": "본문"}]}}
+    ]
+    mock_condense.return_value = "<b>알람</b> & 확인 필요_상태"
+    state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
+
+    run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
+
+    sent_message = mock_send.call_args.args[2]
+    # html.escape는 <, >, & 만 바꾸고 밑줄은 건드리지 않는다
+    assert "&lt;b&gt;알람&lt;/b&gt; &amp; 확인 필요_상태" in sent_message
+    assert "<b>알람</b>" not in sent_message
+    assert "</b> & 확인" not in sent_message
+
+
+@patch("notify.send_telegram_photo")
+@patch("notify.condense_text")
+@patch("notify.fetch_page_blocks")
+@patch("notify.send_telegram_message")
+@patch("notify.fetch_new_pages")
+def test_run_skips_condense_when_no_body_and_no_properties(
+    mock_fetch, mock_send, mock_blocks, mock_condense, mock_photo, tmp_path
+):
+    # 본문도 없고 "요약"/"체크할것" 속성도 비어있으면 빈 문자열을 Gemini에 보낼 이유가 없다
+    # (불필요한 과금 + 무의미한 응답). page-a는 속성이 있어 1회 호출, page-b는 0회여야 한다.
+    mock_fetch.return_value = FIXTURE_PAGES
+    mock_send.return_value = True
+    mock_blocks.return_value = []
+    mock_condense.return_value = "요약됨"
+    state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
+
+    run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
+
+    # 속성이 비어있는 page-b 때문에 추가 호출이 생기면 안 된다
+    assert mock_condense.call_count == 1
+    assert mock_condense.call_args.args[1] == "서보 다 전원 나간 이유..\n알람 없음 확인필요..."
+    # page-b 메시지에는 요약 줄 자체가 없어야 한다
+    second_message = mock_send.call_args_list[1].args[2]
+    assert "요약: " not in second_message
 
 
 from notify import main
@@ -367,6 +562,7 @@ ENV_OK = {
     "NOTION_DATABASE_ID": "db-id",
     "TELEGRAM_BOT_TOKEN": "bot-token",
     "TELEGRAM_CHAT_ID": "chat-id",
+    "GEMINI_API_KEY": "google-key",
 }
 
 
@@ -382,6 +578,7 @@ def test_main_passes_env_vars_to_run(mock_run):
         "database_id": "db-id",
         "bot_token": "bot-token",
         "chat_id": "chat-id",
+        "google_api_key": "google-key",
     }
 
 
@@ -406,7 +603,19 @@ def test_main_exits_1_when_required_env_var_missing(mock_run):
             main()
 
     assert excinfo.value.code == 1
-    # 환경변수가 비면 Notion/텔레그램을 건드리기 전에 즉시 종료해야 한다
+    assert mock_run.call_count == 0
+
+
+@patch("notify.run")
+def test_main_exits_1_when_gemini_key_missing(mock_run):
+    env = dict(ENV_OK)
+    del env["GEMINI_API_KEY"]
+
+    with patch.dict(os.environ, env, clear=True):
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+
+    assert excinfo.value.code == 1
     assert mock_run.call_count == 0
 
 
@@ -421,3 +630,214 @@ def test_main_exits_1_when_required_env_var_is_empty_string(mock_run):
 
     assert excinfo.value.code == 1
     assert mock_run.call_count == 0
+
+
+from notify import fetch_page_blocks, extract_body_text, extract_image_urls
+
+
+def load_fixture_blocks():
+    data = json.loads((FIXTURES_DIR / "notion_blocks_response.json").read_text(encoding="utf-8"))
+    return data["results"]
+
+
+def test_extract_body_text_joins_text_blocks_in_order():
+    blocks = load_fixture_blocks()
+
+    result = extract_body_text(blocks)
+
+    assert result == "서보 알람이 계속 떠서 확인해봄\n전원 케이블 재확인 필요"
+
+
+def test_extract_body_text_returns_empty_string_for_no_text_blocks():
+    blocks = [{"type": "divider", "divider": {}}]
+
+    result = extract_body_text(blocks)
+
+    assert result == ""
+
+
+def test_extract_image_urls_handles_file_and_external_types():
+    blocks = load_fixture_blocks()
+
+    result = extract_image_urls(blocks)
+
+    assert result == [
+        "https://notion-file.example.com/alarm1.png",
+        "https://example.com/external.png",
+    ]
+
+
+def test_extract_image_urls_returns_empty_list_when_no_images():
+    blocks = [{"type": "paragraph", "paragraph": {"rich_text": [{"plain_text": "hi"}]}}]
+
+    result = extract_image_urls(blocks)
+
+    assert result == []
+
+
+@patch("notify.requests.get")
+def test_fetch_page_blocks_returns_results_list(mock_get):
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"results": [{"type": "paragraph"}]}
+    mock_response.raise_for_status.return_value = None
+    mock_get.return_value = mock_response
+
+    result = fetch_page_blocks("fake-token", "fake-page-id")
+
+    assert result == [{"type": "paragraph"}]
+    called_url = mock_get.call_args.args[0]
+    assert called_url == "https://api.notion.com/v1/blocks/fake-page-id/children"
+    called_headers = mock_get.call_args.kwargs["headers"]
+    assert called_headers["Authorization"] == "Bearer fake-token"
+    assert called_headers["Notion-Version"] == "2022-06-28"
+
+
+@patch("notify.requests.get")
+def test_fetch_page_blocks_warns_when_response_has_more(mock_get, capsys):
+    # 100블록 초과 페이지네이션은 범위 밖이지만, 조용히 잘리면 원인 추적이 불가능하다.
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"results": [{"type": "paragraph"}], "has_more": True}
+    mock_response.raise_for_status.return_value = None
+    mock_get.return_value = mock_response
+
+    result = fetch_page_blocks("fake-token", "fake-page-id")
+
+    # 동작은 그대로: 첫 100개만 반환
+    assert result == [{"type": "paragraph"}]
+    captured = capsys.readouterr()
+    assert "[WARN]" in captured.err
+    assert "fake-page-id" in captured.err
+    assert "100블록" in captured.err
+
+
+@patch("notify.requests.get")
+def test_fetch_page_blocks_does_not_warn_when_no_more_blocks(mock_get, capsys):
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"results": [{"type": "paragraph"}], "has_more": False}
+    mock_response.raise_for_status.return_value = None
+    mock_get.return_value = mock_response
+
+    result = fetch_page_blocks("fake-token", "fake-page-id")
+
+    assert result == [{"type": "paragraph"}]
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert captured.out == ""
+
+
+from notify import condense_text
+
+
+@patch("notify.requests.post")
+def test_condense_text_returns_gemini_response(mock_post):
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+    mock_response.json.return_value = {
+        "candidates": [
+            {"content": {"parts": [{"text": "서보 알람 확인 후 케이블 점검 필요"}]}}
+        ]
+    }
+    mock_post.return_value = mock_response
+
+    result = condense_text("fake-google-key", "긴 원본 텍스트...")
+
+    assert result == "서보 알람 확인 후 케이블 점검 필요"
+    called_url = mock_post.call_args.args[0]
+    assert called_url == (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        "gemini-2.5-flash:generateContent"
+    )
+    called_headers = mock_post.call_args.kwargs["headers"]
+    assert called_headers["x-goog-api-key"] == "fake-google-key"
+    called_payload = mock_post.call_args.kwargs["json"]
+    assert "긴 원본 텍스트..." in called_payload["contents"][0]["parts"][0]["text"]
+
+
+@patch("notify.requests.post")
+def test_condense_text_falls_back_to_original_on_failure(mock_post):
+    mock_post.side_effect = requests.RequestException("timeout")
+
+    result = condense_text("fake-google-key", "원본 텍스트")
+
+    assert result == "원본 텍스트"
+
+
+@patch("notify.requests.post")
+def test_condense_text_falls_back_when_response_shape_unexpected(mock_post):
+    # Gemini API가 형식이 다른 응답을 주는 경우(예: candidates가 비어있음, 세이프티
+    # 필터로 콘텐츠가 차단된 경우 등)에도 예외로 죽지 말고 원문을 그대로 써야
+    # 발송이 막히지 않는다
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+    mock_response.json.return_value = {"candidates": []}
+    mock_post.return_value = mock_response
+
+    result = condense_text("fake-google-key", "원본 텍스트")
+
+    assert result == "원본 텍스트"
+
+
+@patch("notify.requests.post")
+def test_condense_text_catches_type_error_when_candidates_is_null(mock_post):
+    # 구형 except (RequestException, KeyError, IndexError) 튜플로는 포착 못 했던 버그 사례:
+    # response.json()이 {"candidates": null}을 반환하면 None[0] 시도 시 TypeError 발생.
+    # broadened except Exception으로 이를 포착하고 원문 반환하도록 수정.
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+    mock_response.json.return_value = {"candidates": None}  # TypeError 발생 지점
+    mock_post.return_value = mock_response
+
+    result = condense_text("fake-google-key", "원본 텍스트")
+
+    assert result == "원본 텍스트"
+
+
+@patch("notify.requests.post")
+def test_condense_text_redacts_api_key_in_error_log(mock_post, capsys):
+    # 텔레그램 함수들과 동일한 방어 패턴 — 예외 메시지에 키가 섞여도 로그로 새지 않게.
+    fake_key = "AIzaSy-FAKE-SECRET-KEY-VALUE"
+    mock_post.side_effect = requests.RequestException(
+        f"401 Unauthorized (key={fake_key})"
+    )
+
+    result = condense_text(fake_key, "원본 텍스트")
+
+    assert result == "원본 텍스트"
+    captured = capsys.readouterr()
+    assert fake_key not in captured.err
+    assert fake_key not in captured.out
+    assert "***" in captured.err
+
+
+from notify import send_telegram_photo
+
+
+@patch("notify.requests.post")
+def test_send_telegram_photo_success_returns_true(mock_post):
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+    mock_post.return_value = mock_response
+
+    result = send_telegram_photo("fake-bot-token", "fake-chat-id", "https://example.com/photo.png")
+
+    assert result is True
+    called_url = mock_post.call_args.args[0]
+    assert called_url == "https://api.telegram.org/botfake-bot-token/sendPhoto"
+    called_payload = mock_post.call_args.kwargs["json"]
+    assert called_payload["chat_id"] == "fake-chat-id"
+    assert called_payload["photo"] == "https://example.com/photo.png"
+
+
+@patch("notify.requests.post")
+def test_send_telegram_photo_failure_returns_false_and_redacts_token(mock_post, capsys):
+    fake_token = "123456:AAH-SECRET-TOKEN-VALUE"
+    mock_post.side_effect = requests.RequestException(
+        f"boom https://api.telegram.org/bot{fake_token}/sendPhoto"
+    )
+
+    result = send_telegram_photo(fake_token, "fake-chat-id", "https://example.com/photo.png")
+
+    assert result is False
+    captured = capsys.readouterr()
+    assert fake_token not in captured.err
+    assert "***" in captured.err

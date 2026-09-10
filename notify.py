@@ -33,6 +33,7 @@ def parse_page(page):
     checklist = _plain_text(props["체크할것"]["rich_text"])
 
     return {
+        "id": page["id"],
         "name": name,
         "summary": summary,
         "checklist": checklist,
@@ -79,13 +80,10 @@ def format_message(page):
     date_str = created_dt.strftime("%Y-%m-%d")
 
     summary = _truncate(page["summary"])
-    checklist = _truncate(page["checklist"])
 
     lines = [f"{emoji} {html.escape(page['name'])} ({date_str})"]
     if summary:
         lines.append(f"요약: {html.escape(summary)}")
-    if checklist:
-        lines.append(f"체크할것: {html.escape(checklist)}")
     lines.append(f'<a href="{html.escape(page["url"], quote=True)}">노션에서 보기</a>')
 
     return "\n".join(lines)
@@ -109,7 +107,27 @@ def send_telegram_message(bot_token, chat_id, text):
         return False
 
 
-def run(notion_token, database_id, bot_token, chat_id, state_path=STATE_FILE):
+def send_telegram_photo(bot_token, chat_id, photo_url):
+    url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
+    payload = {"chat_id": chat_id, "photo": photo_url}
+    try:
+        response = requests.post(url, json=payload, timeout=15)
+        response.raise_for_status()
+        return True
+    except requests.RequestException as exc:
+        safe_message = str(exc).replace(bot_token, "***")
+        print(f"[WARN] 이미지 전송 실패: {safe_message}", file=sys.stderr)
+        return False
+
+
+def build_summary_source(page, body_text):
+    if body_text:
+        return body_text
+    parts = [part for part in (page["summary"], page["checklist"]) if part]
+    return "\n".join(parts)
+
+
+def run(notion_token, database_id, bot_token, chat_id, google_api_key, state_path=STATE_FILE):
     state = load_state(state_path)
     since_iso = state["last_checked"]
 
@@ -124,8 +142,25 @@ def run(notion_token, database_id, bot_token, chat_id, state_path=STATE_FILE):
     ok = True
     latest_sent = since_iso
     for page in pages:
+        try:
+            blocks = fetch_page_blocks(notion_token, page["id"])
+            body_text = extract_body_text(blocks)
+            image_urls = extract_image_urls(blocks)
+        except Exception as exc:
+            # 본문 보강은 best-effort다. 블록 모양이 예상과 달라 KeyError/TypeError 등이
+            # 나더라도 run() 밖으로 터뜨리면, 앞서 성공적으로 보낸 페이지의 latest_sent가
+            # 저장되지 못해 다음 사이클에 중복 발송된다. 무조건 속성 폴백으로 계속 진행한다.
+            print(f"[WARN] 본문 조회 실패, 속성으로 대체: {exc}", file=sys.stderr)
+            body_text = ""
+            image_urls = []
+
+        source_text = build_summary_source(page, body_text)
+        page["summary"] = condense_text(google_api_key, source_text) if source_text else ""
+
         message = format_message(page)
         if send_telegram_message(bot_token, chat_id, message):
+            for image_url in image_urls:
+                send_telegram_photo(bot_token, chat_id, image_url)
             latest_sent = page["created_time"]
         else:
             if latest_sent == page["created_time"]:
@@ -139,8 +174,93 @@ def run(notion_token, database_id, bot_token, chat_id, state_path=STATE_FILE):
     return ok
 
 
+def fetch_page_blocks(notion_token, page_id):
+    url = f"https://api.notion.com/v1/blocks/{page_id}/children"
+    headers = {
+        "Authorization": f"Bearer {notion_token}",
+        "Notion-Version": NOTION_VERSION,
+    }
+    response = requests.get(url, headers=headers, timeout=15)
+    response.raise_for_status()
+    data = response.json()
+    if data.get("has_more"):
+        # 페이지네이션은 의도적으로 범위 밖(설계서: "100개 초과 블록 페이지네이션" 제외)이지만,
+        # 조용히 잘리면 원인 파악이 안 되므로 잘렸다는 사실만 로그로 남긴다.
+        print(f"[WARN] 페이지 {page_id}의 본문이 100블록을 넘어 일부만 요약됩니다", file=sys.stderr)
+    return data["results"]
+
+
+def extract_body_text(blocks):
+    lines = []
+    for block in blocks:
+        block_type = block.get("type")
+        content = block.get(block_type, {})
+        rich_text = content.get("rich_text")
+        if rich_text:
+            text = _plain_text(rich_text)
+            if text:
+                lines.append(text)
+    return "\n".join(lines)
+
+
+def extract_image_urls(blocks):
+    urls = []
+    for block in blocks:
+        if block.get("type") != "image":
+            continue
+        image = block["image"]
+        image_type = image.get("type")
+        if image_type == "file":
+            urls.append(image["file"]["url"])
+        elif image_type == "external":
+            urls.append(image["external"]["url"])
+    return urls
+
+
+GEMINI_MODEL = "gemini-2.5-flash"
+
+
+def condense_text(google_api_key, text):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+    headers = {
+        "x-goog-api-key": google_api_key,
+        "content-type": "application/json",
+    }
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "text": (
+                            "다음은 공장 CS 엔지니어가 작성한 인수인계 메모입니다. "
+                            "핵심만 간결하게 한국어로 요약해줘. 인사말이나 서론 없이 "
+                            "바로 내용만 적어줘.\n\n" + text
+                        )
+                    }
+                ]
+            }
+        ],
+        "generationConfig": {"maxOutputTokens": 300},
+    }
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=20)
+        response.raise_for_status()
+        return response.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except Exception as exc:
+        # 텔레그램 함수들과 동일한 방어 패턴: 예외 메시지에 키가 섞여 들어갈 가능성을 차단
+        safe_message = str(exc).replace(google_api_key, "***")
+        print(f"[WARN] AI 요약 실패, 원문 사용: {safe_message}", file=sys.stderr)
+        return text
+
+
 def main():
-    required = ["NOTION_API_KEY", "NOTION_DATABASE_ID", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]
+    required = [
+        "NOTION_API_KEY",
+        "NOTION_DATABASE_ID",
+        "TELEGRAM_BOT_TOKEN",
+        "TELEGRAM_CHAT_ID",
+        "GEMINI_API_KEY",
+    ]
     missing = [key for key in required if not os.environ.get(key)]
     if missing:
         print(f"[ERROR] 환경변수 누락: {', '.join(missing)}", file=sys.stderr)
@@ -151,6 +271,7 @@ def main():
         database_id=os.environ["NOTION_DATABASE_ID"],
         bot_token=os.environ["TELEGRAM_BOT_TOKEN"],
         chat_id=os.environ["TELEGRAM_CHAT_ID"],
+        google_api_key=os.environ["GEMINI_API_KEY"],
     )
     if not ok:
         sys.exit(1)
