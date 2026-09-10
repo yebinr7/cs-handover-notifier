@@ -543,3 +543,37 @@ def test_condense_text_catches_type_error_when_content_is_null(mock_post):
     result = condense_text("fake-anthropic-key", "원본 텍스트")
 
     assert result == "원본 텍스트"
+
+
+from notify import send_telegram_photo
+
+
+@patch("notify.requests.post")
+def test_send_telegram_photo_success_returns_true(mock_post):
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+    mock_post.return_value = mock_response
+
+    result = send_telegram_photo("fake-bot-token", "fake-chat-id", "https://example.com/photo.png")
+
+    assert result is True
+    called_url = mock_post.call_args.args[0]
+    assert called_url == "https://api.telegram.org/botfake-bot-token/sendPhoto"
+    called_payload = mock_post.call_args.kwargs["json"]
+    assert called_payload["chat_id"] == "fake-chat-id"
+    assert called_payload["photo"] == "https://example.com/photo.png"
+
+
+@patch("notify.requests.post")
+def test_send_telegram_photo_failure_returns_false_and_redacts_token(mock_post, capsys):
+    fake_token = "123456:AAH-SECRET-TOKEN-VALUE"
+    mock_post.side_effect = requests.RequestException(
+        f"boom https://api.telegram.org/bot{fake_token}/sendPhoto"
+    )
+
+    result = send_telegram_photo(fake_token, "fake-chat-id", "https://example.com/photo.png")
+
+    assert result is False
+    captured = capsys.readouterr()
+    assert fake_token not in captured.err
+    assert "***" in captured.err

@@ -109,6 +109,19 @@ def send_telegram_message(bot_token, chat_id, text):
         return False
 
 
+def send_telegram_photo(bot_token, chat_id, photo_url):
+    url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
+    payload = {"chat_id": chat_id, "photo": photo_url}
+    try:
+        response = requests.post(url, json=payload, timeout=15)
+        response.raise_for_status()
+        return True
+    except requests.RequestException as exc:
+        safe_message = str(exc).replace(bot_token, "***")
+        print(f"[WARN] 이미지 전송 실패: {safe_message}", file=sys.stderr)
+        return False
+
+
 def run(notion_token, database_id, bot_token, chat_id, state_path=STATE_FILE):
     state = load_state(state_path)
     since_iso = state["last_checked"]
