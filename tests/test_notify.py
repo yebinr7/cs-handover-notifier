@@ -184,6 +184,36 @@ def test_format_message_truncates_long_summary():
     assert "가" * 1001 not in message
 
 
+def test_format_message_converts_markdown_bold_to_html():
+    # Gemini가 마크다운으로 응답하면 텔레그램 HTML 모드에서 별표가 그대로 노출된다.
+    page = {
+        "name": "야간 김예빈",
+        "summary": "**4호기 비전 불량**: 약 1.5일간 설비 정지 발생, 제어 문제 없음 확인.",
+        "created_time": "2026-09-09T00:00:00.000Z",
+        "url": "https://www.notion.so/abcdef1234567890",
+    }
+
+    message = format_message(page)
+
+    assert "<b>4호기 비전 불량</b>" in message
+    assert "**" not in message
+
+
+def test_format_message_converts_markdown_bullets_to_dots():
+    page = {
+        "name": "주간 백규균",
+        "summary": "오늘 발생한 이슈:\n- 서보 알람 발생\n- 케이블 점검 필요",
+        "created_time": "2026-09-09T00:00:00.000Z",
+        "url": "https://www.notion.so/1122334455667788",
+    }
+
+    message = format_message(page)
+
+    assert "• 서보 알람 발생" in message
+    assert "• 케이블 점검 필요" in message
+    assert "- 서보" not in message
+
+
 import requests
 
 from notify import send_telegram_message
@@ -442,6 +472,35 @@ def test_run_sends_images_after_successful_text_send(
 
     assert result is True
     mock_photo.assert_called_once_with("bot-token", "chat-id", "https://example.com/a.png")
+
+
+@patch("notify.send_telegram_photo_group")
+@patch("notify.send_telegram_photo")
+@patch("notify.condense_text")
+@patch("notify.fetch_page_blocks")
+@patch("notify.send_telegram_message")
+@patch("notify.fetch_new_pages")
+def test_run_sends_multiple_images_as_one_group(
+    mock_fetch, mock_send, mock_blocks, mock_condense, mock_photo, mock_photo_group, tmp_path
+):
+    # 사진이 여러 장이면 하나씩 따로따로가 아니라 앨범 하나로 묶어서 보낸다.
+    mock_fetch.return_value = [FIXTURE_PAGES[0]]
+    mock_send.return_value = True
+    mock_blocks.return_value = [
+        {"type": "image", "image": {"type": "external", "external": {"url": "https://example.com/a.png"}}},
+        {"type": "image", "image": {"type": "external", "external": {"url": "https://example.com/b.png"}}},
+    ]
+    mock_condense.return_value = "요약됨"
+    mock_photo_group.return_value = True
+    state_file = make_state_file(tmp_path, "2026-09-01T00:00:00.000Z")
+
+    result = run("token", "db-id", "bot-token", "chat-id", "google-key", state_path=str(state_file))
+
+    assert result is True
+    mock_photo_group.assert_called_once_with(
+        "bot-token", "chat-id", ["https://example.com/a.png", "https://example.com/b.png"]
+    )
+    mock_photo.assert_not_called()
 
 
 @patch("notify.send_telegram_photo")
@@ -836,6 +895,46 @@ def test_send_telegram_photo_failure_returns_false_and_redacts_token(mock_post, 
     )
 
     result = send_telegram_photo(fake_token, "fake-chat-id", "https://example.com/photo.png")
+
+    assert result is False
+    captured = capsys.readouterr()
+    assert fake_token not in captured.err
+    assert "***" in captured.err
+
+
+from notify import send_telegram_photo_group
+
+
+@patch("notify.requests.post")
+def test_send_telegram_photo_group_success_returns_true(mock_post):
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+    mock_post.return_value = mock_response
+
+    urls = ["https://example.com/1.png", "https://example.com/2.png"]
+    result = send_telegram_photo_group("fake-bot-token", "fake-chat-id", urls)
+
+    assert result is True
+    called_url = mock_post.call_args.args[0]
+    assert called_url == "https://api.telegram.org/botfake-bot-token/sendMediaGroup"
+    called_payload = mock_post.call_args.kwargs["json"]
+    assert called_payload["chat_id"] == "fake-chat-id"
+    assert called_payload["media"] == [
+        {"type": "photo", "media": "https://example.com/1.png"},
+        {"type": "photo", "media": "https://example.com/2.png"},
+    ]
+
+
+@patch("notify.requests.post")
+def test_send_telegram_photo_group_failure_returns_false_and_redacts_token(mock_post, capsys):
+    fake_token = "123456:AAH-SECRET-TOKEN-VALUE"
+    mock_post.side_effect = requests.RequestException(
+        f"boom https://api.telegram.org/bot{fake_token}/sendMediaGroup"
+    )
+
+    result = send_telegram_photo_group(
+        fake_token, "fake-chat-id", ["https://example.com/1.png", "https://example.com/2.png"]
+    )
 
     assert result is False
     captured = capsys.readouterr()
