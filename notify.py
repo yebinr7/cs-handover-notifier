@@ -177,6 +177,40 @@ def extract_image_urls(blocks):
     return urls
 
 
+ANTHROPIC_VERSION = "2023-06-01"
+CLAUDE_MODEL = "claude-haiku-4-5-20251001"
+
+
+def condense_text(anthropic_api_key, text):
+    url = "https://api.anthropic.com/v1/messages"
+    headers = {
+        "x-api-key": anthropic_api_key,
+        "anthropic-version": ANTHROPIC_VERSION,
+        "content-type": "application/json",
+    }
+    payload = {
+        "model": CLAUDE_MODEL,
+        "max_tokens": 300,
+        "messages": [
+            {
+                "role": "user",
+                "content": (
+                    "다음은 공장 CS 엔지니어가 작성한 인수인계 메모입니다. "
+                    "핵심만 간결하게 한국어로 요약해줘. 인사말이나 서론 없이 "
+                    "바로 내용만 적어줘.\n\n" + text
+                ),
+            }
+        ],
+    }
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=20)
+        response.raise_for_status()
+        return response.json()["content"][0]["text"].strip()
+    except (requests.RequestException, KeyError, IndexError) as exc:
+        print(f"[WARN] AI 요약 실패, 원문 사용: {exc}", file=sys.stderr)
+        return text
+
+
 def main():
     required = ["NOTION_API_KEY", "NOTION_DATABASE_ID", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]
     missing = [key for key in required if not os.environ.get(key)]

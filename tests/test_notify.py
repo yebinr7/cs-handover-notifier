@@ -481,3 +481,50 @@ def test_fetch_page_blocks_returns_results_list(mock_get):
     called_headers = mock_get.call_args.kwargs["headers"]
     assert called_headers["Authorization"] == "Bearer fake-token"
     assert called_headers["Notion-Version"] == "2022-06-28"
+
+
+from notify import condense_text
+
+
+@patch("notify.requests.post")
+def test_condense_text_returns_claude_response(mock_post):
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+    mock_response.json.return_value = {
+        "content": [{"type": "text", "text": "서보 알람 확인 후 케이블 점검 필요"}]
+    }
+    mock_post.return_value = mock_response
+
+    result = condense_text("fake-anthropic-key", "긴 원본 텍스트...")
+
+    assert result == "서보 알람 확인 후 케이블 점검 필요"
+    called_url = mock_post.call_args.args[0]
+    assert called_url == "https://api.anthropic.com/v1/messages"
+    called_headers = mock_post.call_args.kwargs["headers"]
+    assert called_headers["x-api-key"] == "fake-anthropic-key"
+    called_payload = mock_post.call_args.kwargs["json"]
+    assert called_payload["model"] == "claude-haiku-4-5-20251001"
+    assert "긴 원본 텍스트..." in called_payload["messages"][0]["content"]
+
+
+@patch("notify.requests.post")
+def test_condense_text_falls_back_to_original_on_failure(mock_post):
+    mock_post.side_effect = requests.RequestException("timeout")
+
+    result = condense_text("fake-anthropic-key", "원본 텍스트")
+
+    assert result == "원본 텍스트"
+
+
+@patch("notify.requests.post")
+def test_condense_text_falls_back_when_response_shape_unexpected(mock_post):
+    # Anthropic API가 형식이 다른 응답을 주는 경우(예: content가 비어있음)에도
+    # 예외로 죽지 말고 원문을 그대로 써야 발송이 막히지 않는다
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+    mock_response.json.return_value = {"content": []}
+    mock_post.return_value = mock_response
+
+    result = condense_text("fake-anthropic-key", "원본 텍스트")
+
+    assert result == "원본 텍스트"
