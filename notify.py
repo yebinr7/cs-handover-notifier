@@ -139,6 +139,44 @@ def run(notion_token, database_id, bot_token, chat_id, state_path=STATE_FILE):
     return ok
 
 
+def fetch_page_blocks(notion_token, page_id):
+    url = f"https://api.notion.com/v1/blocks/{page_id}/children"
+    headers = {
+        "Authorization": f"Bearer {notion_token}",
+        "Notion-Version": NOTION_VERSION,
+    }
+    response = requests.get(url, headers=headers, timeout=15)
+    response.raise_for_status()
+    return response.json()["results"]
+
+
+def extract_body_text(blocks):
+    lines = []
+    for block in blocks:
+        block_type = block.get("type")
+        content = block.get(block_type, {})
+        rich_text = content.get("rich_text")
+        if rich_text:
+            text = _plain_text(rich_text)
+            if text:
+                lines.append(text)
+    return "\n".join(lines)
+
+
+def extract_image_urls(blocks):
+    urls = []
+    for block in blocks:
+        if block.get("type") != "image":
+            continue
+        image = block["image"]
+        image_type = image.get("type")
+        if image_type == "file":
+            urls.append(image["file"]["url"])
+        elif image_type == "external":
+            urls.append(image["external"]["url"])
+    return urls
+
+
 def main():
     required = ["NOTION_API_KEY", "NOTION_DATABASE_ID", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]
     missing = [key for key in required if not os.environ.get(key)]

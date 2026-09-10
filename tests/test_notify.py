@@ -421,3 +421,63 @@ def test_main_exits_1_when_required_env_var_is_empty_string(mock_run):
 
     assert excinfo.value.code == 1
     assert mock_run.call_count == 0
+
+
+from notify import fetch_page_blocks, extract_body_text, extract_image_urls
+
+
+def load_fixture_blocks():
+    data = json.loads((FIXTURES_DIR / "notion_blocks_response.json").read_text(encoding="utf-8"))
+    return data["results"]
+
+
+def test_extract_body_text_joins_text_blocks_in_order():
+    blocks = load_fixture_blocks()
+
+    result = extract_body_text(blocks)
+
+    assert result == "서보 알람이 계속 떠서 확인해봄\n전원 케이블 재확인 필요"
+
+
+def test_extract_body_text_returns_empty_string_for_no_text_blocks():
+    blocks = [{"type": "divider", "divider": {}}]
+
+    result = extract_body_text(blocks)
+
+    assert result == ""
+
+
+def test_extract_image_urls_handles_file_and_external_types():
+    blocks = load_fixture_blocks()
+
+    result = extract_image_urls(blocks)
+
+    assert result == [
+        "https://notion-file.example.com/alarm1.png",
+        "https://example.com/external.png",
+    ]
+
+
+def test_extract_image_urls_returns_empty_list_when_no_images():
+    blocks = [{"type": "paragraph", "paragraph": {"rich_text": [{"plain_text": "hi"}]}}]
+
+    result = extract_image_urls(blocks)
+
+    assert result == []
+
+
+@patch("notify.requests.get")
+def test_fetch_page_blocks_returns_results_list(mock_get):
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"results": [{"type": "paragraph"}]}
+    mock_response.raise_for_status.return_value = None
+    mock_get.return_value = mock_response
+
+    result = fetch_page_blocks("fake-token", "fake-page-id")
+
+    assert result == [{"type": "paragraph"}]
+    called_url = mock_get.call_args.args[0]
+    assert called_url == "https://api.notion.com/v1/blocks/fake-page-id/children"
+    called_headers = mock_get.call_args.kwargs["headers"]
+    assert called_headers["Authorization"] == "Bearer fake-token"
+    assert called_headers["Notion-Version"] == "2022-06-28"
