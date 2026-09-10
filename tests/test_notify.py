@@ -199,18 +199,19 @@ def test_format_message_converts_markdown_bold_to_html():
     assert "**" not in message
 
 
-def test_format_message_converts_markdown_bullets_to_dots():
+def test_format_message_numbers_markdown_bullets():
     page = {
         "name": "주간 백규균",
-        "summary": "오늘 발생한 이슈:\n- 서보 알람 발생\n- 케이블 점검 필요",
+        "summary": "오늘 발생한 이슈:\n- 서보 알람 발생\n- 케이블 점검 필요\n- 재가동 완료",
         "created_time": "2026-09-09T00:00:00.000Z",
         "url": "https://www.notion.so/1122334455667788",
     }
 
     message = format_message(page)
 
-    assert "• 서보 알람 발생" in message
-    assert "• 케이블 점검 필요" in message
+    assert "1. 서보 알람 발생" in message
+    assert "2. 케이블 점검 필요" in message
+    assert "3. 재가동 완료" in message
     assert "- 서보" not in message
 
 

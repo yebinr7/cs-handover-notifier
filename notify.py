@@ -76,13 +76,23 @@ MARKDOWN_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 MARKDOWN_BULLET_RE = re.compile(r"^(\s*)-\s+", re.MULTILINE)
 
 
+def _number_bullets(text):
+    counter = {"n": 0}
+
+    def replace(match):
+        counter["n"] += 1
+        return f"{match.group(1)}{counter['n']}. "
+
+    return MARKDOWN_BULLET_RE.sub(replace, text)
+
+
 def _render_ai_summary(escaped_summary):
     # AI가 마크다운 문법(**굵게**, "- 목록")으로 응답하는 경우가 있는데, 텔레그램
     # HTML 모드는 마크다운을 해석하지 않아서 별표/대시가 그대로 노출된다.
     # html.escape() 이후에 실행해야 안전하다 — <, >, & 는 이미 escape된 상태라
     # 여기서 새로 감싸는 <b> 태그와 섞여도 injection 걱정이 없다.
     text = MARKDOWN_BOLD_RE.sub(r"<b>\1</b>", escaped_summary)
-    text = MARKDOWN_BULLET_RE.sub(r"\1• ", text)
+    text = _number_bullets(text)
     return text
 
 
@@ -276,9 +286,9 @@ def condense_text(google_api_key, text):
                         "text": (
                             "다음은 공장 CS 엔지니어가 작성한 인수인계 메모입니다. "
                             "핵심만 간결하게 한국어로 요약해줘. 인사말이나 서론 없이 "
-                            "바로 내용만 적어줘. 마크다운 문법(**, #, ``` 등)은 쓰지 말고 "
-                            "필요하면 줄바꿈과 \"- \" 목록 정도만 써서 일반 채팅 메시지처럼 "
-                            "작성해줘.\n\n" + text
+                            "바로 내용만 적어줘. 마크다운 문법(**, #, ``` 등)은 쓰지 말고, "
+                            "항목이 여러 개면 \"1. \", \"2. \"처럼 번호를 매겨서 "
+                            "일반 채팅 메시지처럼 작성해줘.\n\n" + text
                         )
                     }
                 ]
