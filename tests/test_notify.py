@@ -528,3 +528,18 @@ def test_condense_text_falls_back_when_response_shape_unexpected(mock_post):
     result = condense_text("fake-anthropic-key", "원본 텍스트")
 
     assert result == "원본 텍스트"
+
+
+@patch("notify.requests.post")
+def test_condense_text_catches_type_error_when_content_is_null(mock_post):
+    # 구형 except (RequestException, KeyError, IndexError) 튜플로는 포착 못 했던 버그 사례:
+    # response.json()이 {"content": null}을 반환하면 None[0] 시도 시 TypeError 발생.
+    # broadened except Exception으로 이를 포착하고 원문 반환하도록 수정.
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+    mock_response.json.return_value = {"content": None}  # TypeError 발생 지점
+    mock_post.return_value = mock_response
+
+    result = condense_text("fake-anthropic-key", "원본 텍스트")
+
+    assert result == "원본 텍스트"

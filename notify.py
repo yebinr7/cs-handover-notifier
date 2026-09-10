@@ -206,7 +206,7 @@ def condense_text(anthropic_api_key, text):
         response = requests.post(url, headers=headers, json=payload, timeout=20)
         response.raise_for_status()
         return response.json()["content"][0]["text"].strip()
-    except (requests.RequestException, KeyError, IndexError) as exc:
+    except Exception as exc:
         print(f"[WARN] AI 요약 실패, 원문 사용: {exc}", file=sys.stderr)
         return text
 
