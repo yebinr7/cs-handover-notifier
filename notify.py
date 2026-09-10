@@ -217,7 +217,7 @@ def extract_image_urls(blocks):
     return urls
 
 
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-3.5-flash-lite"
 
 
 def condense_text(google_api_key, text):

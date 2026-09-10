@@ -745,7 +745,7 @@ def test_condense_text_returns_gemini_response(mock_post):
     called_url = mock_post.call_args.args[0]
     assert called_url == (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        "gemini-2.5-flash:generateContent"
+        "gemini-3.5-flash-lite:generateContent"
     )
     called_headers = mock_post.call_args.kwargs["headers"]
     assert called_headers["x-goog-api-key"] == "fake-google-key"
